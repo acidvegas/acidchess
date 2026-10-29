@@ -1,0 +1,10 @@
+<!-- acidchess - Developed by acidvegas in Python (https://github.com/acidvegas) -->
+<!-- favicon.svg -->
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+	<rect x="2" y="2" width="30" height="30" fill="#b58863"/>
+	<rect x="32" y="2" width="30" height="30" fill="#f0d9b5"/>
+	<rect x="2" y="32" width="30" height="30" fill="#f0d9b5"/>
+	<rect x="32" y="32" width="30" height="30" fill="#b58863"/>
+	<path d="M22 54h20l-2-6H24zM26 48h12l-1-14 4-6-3-10h-4l-1-4h-2l-1 4h-4l-3 10 4 6z" fill="#14141f" stroke="#a6ff4d" stroke-width="2" stroke-linejoin="round"/>
+</svg>

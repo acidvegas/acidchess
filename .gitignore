@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Runtime data (ACIDCHESS_DATA_DIR defaults to data/)
+data/
+
+# Fairy-Stockfish source and binary (see README)
+.build/
+engines/
