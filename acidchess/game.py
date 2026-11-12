@@ -4,12 +4,13 @@
 
 import time
 
+import arcade
 import engine
 import four
 import fourgame
 import recon
 import toggles
-from storage import rating_of, record_bot_game, record_game
+from storage import peak_of, rating_of, record_bot_game, record_game
 
 
 TIME_CONTROLS = {'1+0': (1, 0), '3+0': (3, 0), '3+2': (3, 2), '5+0': (5, 0), '10+0': (10, 0), '10+5': (10, 5), '15+10': (15, 10), '30+0': (30, 0)}
@@ -97,6 +98,9 @@ def finish(room: dict, result: str, reason: str):
 	if result == '*':
 		return
 	w, b = room['players']['w'], room['players']['b']
+	# acid-arcade-db announces a new Classic Elo hundred only the first time it is reached, so keep the peaks from before this game
+	if arcade.enabled() and room['rated'] and mode(room) == 'classic':
+		game['old_peaks'] = {c: peak_of(p['user_id'], 'classic') for c, p in (('w', w), ('b', b)) if p['user_id']}
 	game['rating_diff'] = record_game(room['id'], mode(room), w['name'], b['name'], w['user_id'], b['user_id'], result, reason, room['rated'], room['tc'], pgn(room))
 	if room.get('bot'):
 		human = 'b' if w.get('bot') else 'w'

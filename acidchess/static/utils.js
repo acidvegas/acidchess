@@ -46,6 +46,8 @@ let lobbyTimer = null;
 let onlineTimer = null;
 let chatSeen    = 0;     // chat messages already seen, for the unread badge on the phone chat button
 let captchaId  = null;
+let challenge  = null;  // username from an acid-arcade-db ?challenge= link, until a game for them is created
+let invite     = null;  // { rid, name } of the room made for that challenge, to show its link while waiting
 let ssoTried   = false; // acid-arcade-db shared sign-in already tried since the last good session, so it never loops
 let modeNames  = { classic: 'Classic' };
 let swapNames  = {};
@@ -379,7 +381,18 @@ async function createRoom() {
 		rated: $('create-rated').checked,
 	});
 	if (data.error) return toast(data.error);
+	if (challenge && !['four', 'teams'].includes($('create-mode').value)) { invite = { rid: data.room_id, name: challenge }; challenge = null; }
 	enterRoom(data.room_id, data.player_token);
+}
+
+// acid-arcade-db profile "challenge" link: set up a casual 2-player game, the room's link is then shown to send them
+function openChallenge() {
+	openTab('create');
+	$('create-mode').value = 'classic';
+	$('create-mode').dispatchEvent(new Event('change'));
+	$('create-rated').checked = false;
+	$('create-public').checked = false;
+	toast(`Create the game, then send its link to ${challenge}`);
 }
 
 function chosenTwists() {
@@ -833,6 +846,12 @@ function renderStatus() {
 	const playing = mine && !st.result;
 	const opponent = mine ? st.players[mine === 'w' ? 'b' : 'w'] : null;
 	s.className = 'status';
+	const inviting = invite && invite.rid === st.id && mine && !st.result && Object.values(st.players).some((p) => !p);
+	$('invite-bar').classList.toggle('hidden', !inviting);
+	if (inviting) {
+		$('invite-text').textContent = `Send this link to ${invite.name}`;
+		$('invite-link').textContent = $('invite-link').href = `${location.origin}/${st.id}`;
+	}
 	if (st.board4) return renderStatusFour();
 	if (st.result) {
 		let text = st.result === '1/2-1/2' ? 'Draw' : st.result === '*' ? 'No result' : `${st.result === '1-0' ? 'White' : 'Black'} wins`;
@@ -1266,6 +1285,7 @@ function init() {
 		setTimeout(() => { delete $('btn-resign').dataset.confirm; $('btn-resign').querySelector('.lbl').textContent = 'Resign'; }, 3000);
 	};
 	$('btn-pgn').onclick = () => navigator.clipboard.writeText(st.pgn).then(() => toast('PGN copied'), () => toast('copy failed'));
+	$('btn-invite-copy').onclick = () => navigator.clipboard.writeText($('invite-link').href).then(() => toast('Link copied'), () => toast('copy failed'));
 	$('btn-copy-link').onclick = () => navigator.clipboard.writeText(location.href).then(() => toast('Link copied'), () => toast('copy failed'));
 	$('chat-input').onkeydown = async (e) => {
 		if (e.key !== 'Enter' || !e.target.value.trim()) return;
@@ -1290,9 +1310,11 @@ function init() {
 	setInterval(tickClocks, 100);
 	setInterval(() => { if (rid) fetchState(); }, 15000);
 	loadMe();
-	loadTimeControls();
 
 	const path = location.pathname.replace(/^\/+|\/+$/g, '');
+	// The URL loses ?challenge= when the home page or a room replaces it
+	if (ARCADE && !/^[a-z0-9]{4}$/i.test(path)) challenge = new URLSearchParams(location.search).get('challenge') || null;
+	loadTimeControls().then(() => { if (challenge) openChallenge(); });
 	if (/^[a-z0-9]{4}$/i.test(path)) joinRoom(path, new URLSearchParams(location.search).has('watch'));
 	else showHome();
 }

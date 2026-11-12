@@ -158,6 +158,14 @@ def mirror_user(user_id: int, username: str, create: bool = True):
 			c.execute("INSERT INTO users(id, username, password_hash, created_at) VALUES(?, ?, '', ?)", (user_id, username, int(time.time())))
 
 
+def peak_of(user_id: int, mode: str) -> int:
+	'''Return a user's rounded peak rating in a mode, or the starting rating if they have not played it.'''
+
+	with db_connect() as c:
+		row = c.execute('SELECT peak_rating FROM ratings WHERE user_id=? AND mode=?', (user_id, mode)).fetchone()
+	return round(row['peak_rating']) if row else START_RATING
+
+
 def prune_sessions():
 	'''Delete expired sessions.'''
 

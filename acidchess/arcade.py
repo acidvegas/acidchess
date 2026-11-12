@@ -88,6 +88,15 @@ def enabled() -> bool:
 	return bool(ARCADE_URL)
 
 
+def event(user_id: int, kind: str, text: str):
+	'''Add a line to the arcade activity feed. text reads after the player's name: "won a rated Classic game (+12 Elo)".
+
+	:param kind: a short tag such as win, solve, bigwin, record, streak
+	'''
+
+	call('/internal/event', {'game': ARCADE_GAME, 'user_id': user_id, 'kind': kind, 'text': text})
+
+
 def login(username: str, password: str, ip: str) -> dict:
 	'''Log in. Returns {token, user_id, username} or raises ArcadeError (429 after too many failures).
 
@@ -101,6 +110,12 @@ def logout(token: str):
 	'''End a session.'''
 
 	call('/internal/logout', {'token': token})
+
+
+def presence(user_ids: list):
+	'''Report the signed in players who have this game open right now. Call it every 30 seconds, even with an empty list.'''
+
+	call('/internal/presence', {'game': ARCADE_GAME, 'user_ids': list(user_ids)})
 
 
 def public_url(host: str) -> str:

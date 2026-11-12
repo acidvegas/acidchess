@@ -20,7 +20,7 @@ import auth
 import storage
 
 
-ACCOUNTS = {'tok-ann': {'user_id': 1001, 'username': 'ann', 'admin': False}, 'tok-ben': {'user_id': 1002, 'username': 'ben', 'admin': False}}
+ACCOUNTS = {'tok-ann': {'user_id': 1001, 'username': 'ann', 'admin': False}, 'tok-ben': {'user_id': 1002, 'username': 'ben', 'admin': False}, 'tok-cara': {'user_id': 5001, 'username': 'cara', 'admin': False}, 'tok-dov': {'user_id': 5002, 'username': 'dov', 'admin': False}}
 
 
 class Stop(BaseException):
@@ -35,7 +35,8 @@ class TestArcade(unittest.TestCase):
 
 		self.client = server.app.test_client()
 		self.pushed = mock.Mock()
-		for patch in (mock.patch.object(arcade, 'enabled', return_value=True), mock.patch.object(arcade, 'ARCADE_PUBLIC', 'https://arcade.example'), mock.patch.object(arcade, 'session', side_effect=ACCOUNTS.get), mock.patch.object(arcade, 'push_stats', self.pushed)):
+		self.events = mock.Mock()
+		for patch in (mock.patch.object(arcade, 'event', self.events), mock.patch.object(arcade, 'enabled', return_value=True), mock.patch.object(arcade, 'ARCADE_PUBLIC', 'https://arcade.example'), mock.patch.object(arcade, 'session', side_effect=ACCOUNTS.get), mock.patch.object(arcade, 'push_stats', self.pushed)):
 			patch.start()
 			self.addCleanup(patch.stop)
 
@@ -49,8 +50,16 @@ class TestArcade(unittest.TestCase):
 		return resp.get_json()
 
 
-	def sync_once(self, changes: dict):
-		'''Run one pass of the acid-arcade-db sync loop.'''
+	def play_rated(self, white: str, black: str):
+		'''Play a rated Classic game that black resigns.'''
+
+		a = self.call('/create', {'rated': True, 'color': 'w'}, white)
+		b = self.call('/join', {'room_id': a['room_id']}, black)
+		self.call('/resign', {'room_id': a['room_id'], 'player_token': b['player_token']})
+
+
+	def run_once(self, loop):
+		'''Run one pass of a background loop that sleeps at the end of each pass.'''
 
 		real = time.sleep
 
@@ -59,19 +68,16 @@ class TestArcade(unittest.TestCase):
 				raise Stop
 			real(n)
 
-		with mock.patch.object(arcade, 'changes', return_value=changes), mock.patch.object(server.time, 'sleep', fake_sleep):
+		with mock.patch.object(server.time, 'sleep', fake_sleep):
 			with self.assertRaises(Stop):
-				server.arcade_sync()
+				loop()
 
 
-	def wait_pushes(self, count: int) -> dict:
-		'''Wait for stats pushes and return them by user id.'''
+	def sync_once(self, changes: dict):
+		'''Run one pass of the acid-arcade-db sync loop.'''
 
-		end = time.time() + 5
-		while self.pushed.call_count < count and time.time() < end:
-			time.sleep(0.05)
-		self.assertEqual(self.pushed.call_count, count)
-		return {c.args[0]: c.args[1:] for c in self.pushed.call_args_list}
+		with mock.patch.object(arcade, 'changes', return_value=changes):
+			self.run_once(server.arcade_sync)
 
 
 	def test_auth_proxy(self):
@@ -105,6 +111,32 @@ class TestArcade(unittest.TestCase):
 			self.assertIn(b'data-arcade="https://arcade.acid.vegas"', self.client.get('/', base_url='https://chess.acid.vegas').data)
 
 
+	def test_computer_event(self):
+		'''Beating the computer is announced, losing to it is not.'''
+
+		room = {'mode': 'classic', 'bot': 3, 'game': {'result': '0-1', 'rating_diff': {}}, 'players': {'w': {'name': 'Computer level 3', 'user_id': None, 'bot': 3}, 'b': {'name': 'ann', 'user_id': 1001}}}
+		server.announce(room)
+		self.wait_events(1)
+		self.assertEqual(self.events.call_args.args, (1001, 'win', 'beat the level 3 computer'))
+		room['game']['result'] = '1-0'
+		server.announce(room)
+		time.sleep(0.2)
+		self.assertEqual(self.events.call_count, 1)
+
+
+	def test_elo_record_event(self):
+		'''Crossing a new Classic Elo hundred from 1500 up is announced only the first time.'''
+
+		with storage.DB_LOCK, storage.db_connect() as c:
+			c.execute("INSERT OR REPLACE INTO ratings(user_id, mode, rating, peak_rating) VALUES(5001, 'classic', 1495, 1495)")
+		self.play_rated('tok-cara', 'tok-dov')
+		self.assertEqual(self.wait_events(2), [(5001, 'win', 'won a rated Classic game (+6 Elo)'), (5001, 'record', 'reached 1500 Classic Elo')])
+		with storage.DB_LOCK, storage.db_connect() as c:
+			c.execute("UPDATE ratings SET rating=1495 WHERE user_id=5001 AND mode='classic'")
+		self.play_rated('tok-cara', 'tok-dov')
+		self.assertEqual(self.wait_events(3)[2:], [(5001, 'win', 'won a rated Classic game (+6 Elo)')])
+
+
 	def test_game_rename_delete(self):
 		'''A rated game pushes both summaries, renames show everywhere and a deleted account leaves no rows.'''
 
@@ -123,6 +155,7 @@ class TestArcade(unittest.TestCase):
 		self.call('/chat', {'room_id': a['room_id'], 'player_token': b['player_token'], 'text': 'gg'})
 		time.sleep(0.2)
 		self.assertEqual(self.pushed.call_count, 2)
+		self.assertEqual(self.wait_events(1), [(1001, 'win', 'won a rated Big Board 10x8 game (+20 Elo)')])
 		s = self.call(f'/state?room_id={a["room_id"]}')
 		self.assertEqual((s['players']['w']['user_id'], s['chat'][0]['user_id']), (1001, 1002))
 
@@ -151,6 +184,24 @@ class TestArcade(unittest.TestCase):
 		storage.mirror_user(2002, 'swapme')
 		with storage.db_connect() as c:
 			self.assertEqual({r['id']: r['username'] for r in c.execute('SELECT id, username FROM users WHERE id IN (2001, 2002)')}, {2001: '#2001', 2002: 'swapme'})
+
+
+	def test_presence(self):
+		'''Players whose session was checked in the last minute and players seated in a watched room are reported, even when that is nobody.'''
+
+		with mock.patch.dict(server.SUBSCRIBERS, clear=True), mock.patch.object(arcade, 'presence') as presence:
+			server.SEEN.clear()
+			self.run_once(server.arcade_presence)
+			self.assertEqual(presence.call_args.args, ([],))
+			self.call('/online', auth_token='tok-ann')
+			server.SEEN[9999] = time.time() - 120
+			self.run_once(server.arcade_presence)
+			self.assertEqual(presence.call_args.args, ([1001],))
+			a = self.call('/create', {'name': 'x'}, 'tok-ben')
+			server.SEEN.clear()
+			server.SUBSCRIBERS[a['room_id']] = [object()]
+			self.run_once(server.arcade_presence)
+			self.assertEqual(presence.call_args.args, ([1002],))
 
 
 	def test_shared_sign_in(self):
@@ -193,9 +244,28 @@ class TestArcade(unittest.TestCase):
 		self.assertEqual((main, stats), (1220, {'Classic Elo': 1220, 'Games': 1, 'Wins': 1, 'Losses': 0, 'Draws': 0, 'Bot wins': 1, 'Bot losses': 0, 'Bot draws': 1}))
 
 
+	def wait_events(self, count: int) -> list:
+		'''Wait for activity feed events and return their (user id, kind, text).'''
+
+		end = time.time() + 5
+		while self.events.call_count < count and time.time() < end:
+			time.sleep(0.05)
+		self.assertEqual(self.events.call_count, count)
+		return [c.args for c in self.events.call_args_list]
+
+
+	def wait_pushes(self, count: int) -> dict:
+		'''Wait for stats pushes and return them by user id.'''
+
+		end = time.time() + 5
+		while self.pushed.call_count < count and time.time() < end:
+			time.sleep(0.05)
+		self.assertEqual(self.pushed.call_count, count)
+		return {c.args[0]: c.args[1:] for c in self.pushed.call_args_list}
+
 
 class TestStandalone(unittest.TestCase):
-	'''Without acid-arcade-db the site never touches the shared sign-in cookie.'''
+	'''Without acid-arcade-db the site never touches the shared sign-in cookie or the activity feed.'''
 
 	def test_no_cookie(self):
 		'''Signup, login, me and logout set no cookie, and there is no /auth/sso.'''
@@ -208,6 +278,26 @@ class TestStandalone(unittest.TestCase):
 			self.assertEqual(resp.status_code, 200)
 			self.assertNotIn('Set-Cookie', resp.headers)
 		self.assertEqual(client.get('/auth/sso', headers={'Cookie': f'{arcade.COOKIE}=x'}).status_code, 404)
+
+
+	def test_no_feed(self):
+		'''A finished rated game and the home page send no events, stats or presence.'''
+
+		client = server.app.test_client()
+		tokens = []
+		for name in ('solo_w', 'solo_b'):
+			cap = client.get('/auth/captcha').get_json()
+			tokens.append(client.post('/auth/signup', json={'username': name, 'password': 'hunter22x', 'captcha_id': cap['captcha_id'], 'captcha': auth.CAPTCHAS[cap['captcha_id']][0]}).get_json()['token'])
+		with mock.patch.object(arcade, 'event') as event, mock.patch.object(arcade, 'push_stats') as push, mock.patch.object(arcade, 'presence') as presence, mock.patch.object(arcade, 'session') as session:
+			a = client.post('/create', json={'rated': True, 'color': 'w'}, headers={'X-Auth-Token': tokens[0]}).get_json()
+			b = client.post('/join', json={'room_id': a['room_id']}, headers={'X-Auth-Token': tokens[1]}).get_json()
+			client.post('/resign', json={'room_id': a['room_id'], 'player_token': b['player_token']})
+			client.get('/online', headers={'X-Auth-Token': tokens[0]})
+			time.sleep(0.2)
+			self.assertEqual(server.rooms[a['room_id']]['game']['result'], '1-0')
+			for fn in (event, push, presence, session):
+				fn.assert_not_called()
+		self.assertNotIn('old_peaks', server.rooms[a['room_id']]['game'])
 
 
 

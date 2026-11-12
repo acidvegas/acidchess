@@ -20,6 +20,7 @@ CAPTCHAS       = {}
 CAPTCHA_LOCK   = threading.Lock()
 USERNAME_RE    = re.compile(r'^[A-Za-z0-9_]{3,16}$')
 CAPTCHA_CHARS  = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' # no I/O/0/1
+SEEN           = {} # acid-arcade-db user id -> when their session was last checked, for presence
 CAPTCHA_COLORS = ['#ff7da0', '#ffae41', '#4dd17a', '#5fa8ff', '#b07dff', '#ffd86a', '#ff5e8a', '#7da0ff']
 
 
@@ -100,6 +101,7 @@ def request_user() -> tuple:
 		if not user:
 			return None, None
 		mirror_user(user['user_id'], user['username'])
+		SEEN[user['user_id']] = time.time()
 		return user['user_id'], user['username']
 	with db_connect() as c:
 		row = c.execute('SELECT u.id, u.username FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token=? AND s.expires_at > ?', (token, int(time.time()))).fetchone()

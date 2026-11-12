@@ -21,8 +21,8 @@ import engine
 import fourgame
 import game as chess_game
 import toggles
-from auth import USERNAME_RE, captcha_create, captcha_verify, create_session, delete_session, request_token, request_user
-from storage import DB_LOCK, db_connect, delete_room, delete_user, get_user, init_db, leaderboard, load_rooms, mirror_user, prune_sessions, save_room, summary
+from auth import SEEN, USERNAME_RE, captcha_create, captcha_verify, create_session, delete_session, request_token, request_user
+from storage import DB_LOCK, db_connect, delete_room, delete_user, get_user, init_db, leaderboard, load_rooms, mirror_user, prune_sessions, rating_of, save_room, summary
 
 
 app = Flask(__name__)
@@ -49,10 +49,63 @@ for _room in rooms.values():
 	_room['spectators'] = {}
 
 
+def announce(room: dict):
+	'''Post a finished game's wins and new Classic Elo hundreds to the acid-arcade-db activity feed from a background thread.'''
+
+	game    = room['game']
+	winners = list(game['result']) if chess_game.is_four(room) else {'1-0': ['w'], '0-1': ['b']}.get(game['result'], [])
+	diff    = game['rating_diff'] or {}
+	lines   = []
+	for color, p in room['players'].items():
+		if not p or not p['user_id']:
+			continue
+		if color in winners and room.get('bot'):
+			lines.append((p['user_id'], 'win', f'beat the level {room["bot"]} computer'))
+		elif color in winners and color in diff:
+			lines.append((p['user_id'], 'win', f'won a rated {chess_game.MODES[chess_game.mode(room)]["name"]} game ({diff[color]:+d} Elo)'))
+		peak = game.get('old_peaks', {}).get(color)
+		if peak is not None:
+			hundred = rating_of(p['user_id'], 'classic') // 100 * 100
+			if hundred >= 1500 and peak < hundred:
+				lines.append((p['user_id'], 'record', f'reached {hundred} Classic Elo'))
+
+	def send():
+		for user_id, kind, text in lines:
+			try:
+				arcade.event(user_id, kind, text)
+			except Exception as e:
+				print(f'event({user_id}, {kind}) failed: {e}')
+
+	if lines:
+		threading.Thread(target=send, daemon=True).start()
+
+
 def api_error(message: str, status: int = 400) -> tuple:
 	'''Return a JSON error response.'''
 
 	return jsonify({'error': message}), status
+
+
+def arcade_presence():
+	'''Background loop: every 30 seconds, tell acid-arcade-db which signed in players have the game open.
+
+	That is anyone whose session was checked in the last minute (the home page asks every few seconds), plus players seated in a room with an open event stream.
+	'''
+
+	while True:
+		try:
+			now = time.time()
+			for user_id in [u for u, at in list(SEEN.items()) if now - at > 60]:
+				SEEN.pop(user_id, None)
+			ids = set(SEEN)
+			with ROOMS_LOCK, SUBSCRIBERS_LOCK:
+				for room in rooms.values():
+					if SUBSCRIBERS.get(room['id']):
+						ids.update(p['user_id'] for p in room['players'].values() if p and p['user_id'])
+			arcade.presence(sorted(ids))
+		except Exception as e:
+			print(f'arcade presence error: {e}')
+		time.sleep(30)
 
 
 def arcade_reply(reply: dict) -> Response:
@@ -119,6 +172,7 @@ def changed(room: dict):
 	if arcade.enabled() and game['result'] and game['result'] != '*' and (room['rated'] or room.get('bot')) and not game.get('stats_pushed'):
 		game['stats_pushed'] = True
 		push_stats([p['user_id'] for p in room['players'].values() if p and p['user_id']])
+		announce(room)
 	save_room(room['id'], room)
 	notify(room['id'])
 
@@ -639,6 +693,8 @@ def move():
 def online():
 	'''Count the live room connections (players and spectators) and the rooms they are in.'''
 
+	if arcade.enabled():
+		request_user() # the home page asks every few seconds, which keeps a signed in visitor present
 	with SUBSCRIBERS_LOCK:
 		return jsonify({'players': sum(len(qs) for qs in SUBSCRIBERS.values()), 'rooms': sum(1 for qs in SUBSCRIBERS.values() if qs)})
 
@@ -779,6 +835,7 @@ atexit.register(lambda: [save_room(rid, room) for rid, room in list(rooms.items(
 threading.Thread(target=ticker, daemon=True).start()
 if arcade.enabled():
 	threading.Thread(target=arcade_sync, daemon=True).start()
+	threading.Thread(target=arcade_presence, daemon=True).start()
 
 
 

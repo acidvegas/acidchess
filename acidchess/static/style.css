@@ -351,6 +351,8 @@ label.check:has(input:disabled) { color: var(--dim); cursor: not-allowed; }
 
 .offer { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; background: var(--panel2); padding: 8px; border-radius: 8px; }
 .offer span { flex: 1; }
+.offer.invite { border: 1px solid var(--accent); }
+.offer.invite a { color: var(--accent); overflow-wrap: anywhere; }
 
 .moves {
 	flex: 1;
