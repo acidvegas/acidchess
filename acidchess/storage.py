@@ -35,6 +35,21 @@ def delete_room(rid: str):
 		c.execute('DELETE FROM rooms WHERE id=?', (rid,))
 
 
+def delete_user(user_id: int):
+	'''Remove an account deleted in acid-arcade-db: its mirror row, sessions, ratings and computer records. Its games stay for the opponents with the name and id blanked.'''
+
+	with DB_LOCK, db_connect() as c:
+		for table in ('sessions', 'ratings', 'bot_stats'):
+			c.execute(f'DELETE FROM {table} WHERE user_id=?', (user_id,))
+		c.execute("UPDATE games SET white='deleted', white_id=NULL WHERE white_id=?", (user_id,))
+		c.execute("UPDATE games SET black='deleted', black_id=NULL WHERE black_id=?", (user_id,))
+		for row in c.execute('SELECT id, players FROM games4 WHERE players LIKE ?', (f'%, {user_id}]%',)).fetchall():
+			players = json.loads(row['players'])
+			players = {k: ['deleted', None] if v[1] == user_id else v for k, v in players.items()}
+			c.execute('UPDATE games4 SET players=? WHERE id=?', (json.dumps(players), row['id']))
+		c.execute('DELETE FROM users WHERE id=?', (user_id,))
+
+
 def elo_k(row: sqlite3.Row) -> int:
 	'''Return the FIDE-style K factor for a player.'''
 
@@ -55,7 +70,8 @@ def get_user(user_id: int) -> dict:
 		user = dict(row)
 		user['ratings'] = {r['mode']: rounded(r) for r in c.execute('SELECT * FROM ratings WHERE user_id=?', (user_id,)).fetchall()}
 		user['bot']     = [dict(r) for r in c.execute('SELECT level, wins, losses, draws FROM bot_stats WHERE user_id=? ORDER BY level', (user_id,)).fetchall()]
-		user['recent']  = [dict(r) for r in c.execute('SELECT room_id, mode, white, black, white_id, black_id, result, reason, rated, tc, ended_at FROM games WHERE white_id=? OR black_id=? ORDER BY ended_at DESC LIMIT 10', (user_id, user_id)).fetchall()]
+		# Names come from the users table so a renamed account shows its current name, guests keep the name they typed
+		user['recent']  = [dict(r) for r in c.execute('SELECT g.room_id, g.mode, COALESCE(w.username, g.white) AS white, COALESCE(b.username, g.black) AS black, g.white_id, g.black_id, g.result, g.reason, g.rated, g.tc, g.ended_at FROM games g LEFT JOIN users w ON w.id = g.white_id LEFT JOIN users b ON b.id = g.black_id WHERE g.white_id=? OR g.black_id=? ORDER BY g.ended_at DESC LIMIT 10', (user_id, user_id)).fetchall()]
 	return user
 
 
@@ -125,6 +141,21 @@ def load_rooms() -> dict:
 			except ValueError as e:
 				print(f'skipping corrupt room {row["id"]}: {e}')
 	return out
+
+
+def mirror_user(user_id: int, username: str, create: bool = True):
+	'''Keep the local row of an acid-arcade-db account at its current username, adding the row first if create is set.'''
+
+	with DB_LOCK, db_connect() as c:
+		row = c.execute('SELECT username FROM users WHERE id=?', (user_id,)).fetchone()
+		if (row and row['username'] == username) or (not row and not create):
+			return
+		# A different row holding the name is a stale mirror from before a rename, park it on a placeholder until its own rename arrives
+		c.execute("UPDATE users SET username='#' || id WHERE username=? AND id<>?", (username, user_id))
+		if row:
+			c.execute('UPDATE users SET username=? WHERE id=?', (username, user_id))
+		else:
+			c.execute("INSERT INTO users(id, username, password_hash, created_at) VALUES(?, ?, '', ?)", (user_id, username, int(time.time())))
 
 
 def prune_sessions():
@@ -230,3 +261,21 @@ def save_room(rid: str, room: dict):
 			c.execute('INSERT OR REPLACE INTO rooms(id, data, updated_at) VALUES(?, ?, ?)', (rid, json.dumps(room), int(time.time())))
 	except (sqlite3.Error, TypeError, ValueError) as e:
 		print(f'save_room({rid}) failed: {e}')
+
+
+def summary(user_id: int, mode_names: dict) -> tuple:
+	'''Return (classic rating, stats by label) for a player's acid-arcade-db profile.
+
+	:param mode_names: mode -> display name
+	'''
+
+	with db_connect() as c:
+		ratings = c.execute('SELECT * FROM ratings WHERE user_id=?', (user_id,)).fetchall()
+		bot     = c.execute('SELECT COUNT(*) AS n, SUM(wins) AS wins, SUM(losses) AS losses, SUM(draws) AS draws FROM bot_stats WHERE user_id=?', (user_id,)).fetchone()
+	main  = next((round(r['rating']) for r in ratings if r['mode'] == 'classic'), START_RATING)
+	stats = {f'{mode_names.get(r["mode"], r["mode"])} Elo': round(r['rating']) for r in ratings if r['games']}
+	for key in ('games', 'wins', 'losses', 'draws'):
+		stats[key.title()] = sum(r[key] for r in ratings)
+	if bot['n']:
+		stats.update({'Bot wins': bot['wins'], 'Bot losses': bot['losses'], 'Bot draws': bot['draws']})
+	return main, stats

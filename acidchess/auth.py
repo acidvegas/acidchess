@@ -10,7 +10,8 @@ import time
 
 from flask import request
 
-from storage import DB_LOCK, db_connect
+import arcade
+from storage import DB_LOCK, db_connect, mirror_user
 
 
 CAPTCHA_TTL    = 300
@@ -94,6 +95,12 @@ def request_user() -> tuple:
 	token = request_token()
 	if not token:
 		return None, None
+	if arcade.enabled():
+		user = arcade.session(token)
+		if not user:
+			return None, None
+		mirror_user(user['user_id'], user['username'])
+		return user['user_id'], user['username']
 	with db_connect() as c:
 		row = c.execute('SELECT u.id, u.username FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token=? AND s.expires_at > ?', (token, int(time.time()))).fetchone()
 	return (row['id'], row['username']) if row else (None, None)

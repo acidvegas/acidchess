@@ -8,6 +8,7 @@ const FILES = 'abcdefghijklmn';
 const UCI_RE = /^([a-n]\d+)([a-n]\d+)([a-z]?)$/;
 const DROP_RE = /^([A-Z])@([a-n]\d+)$/;
 const FOUR = ['r', 'b', 'y', 'g'];
+const ARCADE = document.body.dataset.arcade; // acid-arcade-db public URL, empty when the site keeps its own accounts
 const FOUR_NAMES = { r: 'Red', b: 'Blue', y: 'Yellow', g: 'Green' };
 const LEVEL_NAMES = ['Beginner', 'Novice', 'Casual', 'Club', 'Strong club', 'Expert', 'Master', 'Maximum'];
 const REASONS = {
@@ -42,7 +43,10 @@ let events     = null;
 let lastResult = null;
 let flagPolled = 0;
 let lobbyTimer = null;
+let onlineTimer = null;
+let chatSeen    = 0;     // chat messages already seen, for the unread badge on the phone chat button
 let captchaId  = null;
+let ssoTried   = false; // acid-arcade-db shared sign-in already tried since the last good session, so it never loops
 let modeNames  = { classic: 'Classic' };
 let swapNames  = {};
 let senseHover = null;  // square under the pointer while choosing where to sense
@@ -65,6 +69,16 @@ async function api(path, body) {
 	const data = await res.json().catch(() => ({ error: 'bad response' }));
 	if (!res.ok && !data.error) data.error = 'request failed';
 	return data;
+}
+
+// Account picture from acid-arcade-db, nothing for guests or without acid-arcade-db
+function avatar(userId) {
+	return ARCADE && userId ? `<img class="avatar" src="${ARCADE}/avatar/${userId}" alt="">` : '';
+}
+
+function setAvatar(img, userId) {
+	img.classList.toggle('hidden', !(ARCADE && userId));
+	if (ARCADE && userId) img.src = `${ARCADE}/avatar/${userId}`;
 }
 
 function icon(name) {
@@ -163,19 +177,34 @@ function openHelp(game) {
 // ---------- account ----------
 
 async function loadMe() {
+	// Signed in on another acid-arcade-db site of this domain? Swap the shared cookie for a session here
+	if (!authToken && ARCADE && !ssoTried) {
+		ssoTried = true;
+		const sso = await api('/auth/sso');
+		if (sso.token) { authToken = sso.token; localStorage.setItem('acidchess_auth', authToken); }
+	}
 	if (!authToken) { me = null; renderAccount(); return; }
 	const data = await api('/auth/me');
 	me = data.user || null;
-	if (!me) { authToken = ''; localStorage.removeItem('acidchess_auth'); }
+	// An error such as the account server being down keeps the token for next time, only a rejected token is dropped
+	if (!me && !data.error) {
+		authToken = '';
+		localStorage.removeItem('acidchess_auth');
+		if (ARCADE && !ssoTried) return loadMe();
+	}
+	if (me) ssoTried = false;
 	renderAccount();
 }
 
 function renderAccount() {
 	$('account-name').textContent = me ? `${me.username} (${me.ratings.classic ? me.ratings.classic.rating : 1200})` : 'Guest';
+	setAvatar($('account-avatar'), me && me.id);
+	$('account-icon').classList.toggle('hidden', !!(ARCADE && me));
 	$('btn-signin').classList.toggle('hidden', !!me);
 	$('btn-profile').classList.toggle('hidden', !me);
 	$('btn-logout').classList.toggle('hidden', !me);
 	$('guest-name').classList.toggle('hidden', !!me);
+	if (!rid) loadActive();
 }
 
 async function showAuth(mode) {
@@ -226,11 +255,12 @@ async function showProfile(userId) {
 	const recent = u.recent.map((g) => {
 		const white = g.white_id === u.id;
 		const res = g.result === '1/2-1/2' ? 'Draw' : (g.result === '1-0') === white ? 'Win' : 'Loss';
-		return `<tr><td>${res}</td><td>vs ${esc(white ? g.black : g.white)}</td><td>${esc(modeNames[g.mode] || g.mode)}</td><td>${esc(g.tc || '∞')}</td><td>${g.rated ? 'Rated' : 'Casual'}</td></tr>`;
+		return `<tr><td>${res}</td><td>vs ${avatar(white ? g.black_id : g.white_id)}${esc(white ? g.black : g.white)}</td><td>${esc(modeNames[g.mode] || g.mode)}</td><td>${esc(g.tc || '∞')}</td><td>${g.rated ? 'Rated' : 'Casual'}</td></tr>`;
 	}).join('');
 	const ratings = Object.entries(u.ratings).map(([m, r]) => `<tr><td>${esc(modeNames[m] || m)}</td><td>${r.rating}</td><td>${r.peak_rating}</td><td>${r.wins}/${r.losses}/${r.draws}</td><td>${r.best_streak}</td></tr>`).join('');
 	openModal(`
-		<h2>${esc(u.username)}</h2>
+		<h2>${avatar(u.id)}${esc(u.username)}</h2>
+		${ARCADE && me && me.id === u.id ? `<p><a class="link" href="${ARCADE}/account" target="_blank" rel="noopener">Account settings</a></p>` : ''}
 		<h3>Ratings</h3>
 		${ratings ? `<table class="list"><thead><tr><th>Mode</th><th>Rating</th><th>Peak</th><th>W/L/D</th><th>Best streak</th></tr></thead><tbody>${ratings}</tbody></table>` : '<p class="empty">No rated games yet. Everyone starts at 1200.</p>'}
 		${u.bot.length ? `<h3>Vs computer</h3><table class="list"><thead><tr><th>Level</th><th>W</th><th>L</th><th>D</th></tr></thead><tbody>${u.bot.map((b) => `<tr><td>${b.level} · ${LEVEL_NAMES[b.level - 1]}</td><td>${b.wins}</td><td>${b.losses}</td><td>${b.draws}</td></tr>`).join('')}</tbody></table>` : ''}
@@ -244,11 +274,37 @@ async function showProfile(userId) {
 function showHome() {
 	rid = null; ptoken = null; st = null;
 	if (events) { events.close(); events = null; }
+	closeSheets();
 	history.replaceState(null, '', '/');
 	$('game').classList.add('hidden');
 	$('home').classList.remove('hidden');
 	document.title = 'acidchess';
+	loadActive();
+	loadOnline();
+	clearInterval(onlineTimer);
+	onlineTimer = setInterval(loadOnline, 5000);
 	openTab(document.querySelector('.tab.active').dataset.tab);
+}
+
+async function loadActive() {
+	// Games this player still has a seat in: the account's games, plus the room tokens this browser kept
+	const tokens = {};
+	for (let i = 0; i < localStorage.length; i++) {
+		const key = localStorage.key(i);
+		if (key.startsWith('acidchess_room_')) tokens[key.slice(15)] = localStorage.getItem(key);
+	}
+	const data = await api('/active', { tokens });
+	const box  = $('active-games');
+	if (data.error || rid || !data.rooms.length) return box.classList.add('hidden');
+	box.innerHTML = '<h3>Active games</h3>' + data.rooms.map((r) => `<button class="btn" data-room="${esc(r.room_id)}" data-token="${esc(r.player_token)}">${icon('swords')}<span class="ag-text"><span class="ag-who">vs ${esc(r.opponents.join(', ') || 'waiting for opponent')}</span><span class="dim">${esc(r.mode)}${r.tc ? ` · ${esc(r.tc)}` : ''}</span></span></button>`).join('');
+	box.querySelectorAll('[data-room]').forEach((b) => b.onclick = () => { localStorage.setItem(`acidchess_room_${b.dataset.room}`, b.dataset.token); joinRoom(b.dataset.room); });
+	box.classList.remove('hidden');
+}
+
+async function loadOnline() {
+	const data = await api('/online');
+	if (data.error) return;
+	$('home-online').textContent = data.players ? `${data.players} player${data.players === 1 ? '' : 's'} online in ${data.rooms} game${data.rooms === 1 ? '' : 's'}` : 'No one online right now';
 }
 
 function openTab(name) {
@@ -263,8 +319,8 @@ async function loadLobby() {
 	if (rid) return clearInterval(lobbyTimer);
 	const data = await api('/lobby');
 	const rows = (data.rooms || []).map((r) => `
-		<tr><td>${esc(r.name)}</td><td>${r.rating ?? '-'}</td><td>${esc(modeNames[r.mode] || r.mode)}${r.rated ? ' · Rated' : ''}${twistsText(r.toggles) ? `<br><small>${esc(twistsText(r.toggles))}</small>` : ''}</td><td>${esc(r.tc || '∞')}</td>
-		<td><button class="btn small" data-join="${r.room_id}">${icon('enter')}${r.seats > 2 ? `Join ${r.seated}/${r.seats}` : 'Join'}</button></td></tr>`).join('');
+		<tr><td class="name">${avatar(r.user_id)}${esc(r.name)}</td><td>${r.rating ?? '-'}</td><td>${esc(modeNames[r.mode] || r.mode)}${r.rated ? ' · Rated' : ''}${twistsText(r.toggles) ? `<br><small>${esc(twistsText(r.toggles))}</small>` : ''}</td><td>${esc(r.tc || '∞')}</td>
+		<td><button class="btn small" data-join="${r.room_id}">${icon('enter')}<span class="lbl">Join</span>${r.seats > 2 ? `<span>${r.seated}/${r.seats}</span>` : ''}</button></td></tr>`).join('');
 	$('lobby-rows').innerHTML = rows;
 	$('lobby-empty').classList.toggle('hidden', !!rows);
 	$('lobby-rows').querySelectorAll('[data-join]').forEach((b) => b.onclick = () => joinRoom(b.dataset.join));
@@ -273,7 +329,7 @@ async function loadLobby() {
 async function loadLeaders() {
 	const data = await api(`/leaderboard?mode=${$('leader-mode').value || 'classic'}`);
 	const rows = (data.players || []).map((p, i) => `
-		<tr class="${me && me.id === p.id ? 'me' : ''}"><td>${i + 1}</td><td><button class="link" data-user="${p.id}">${esc(p.username)}</button></td><td>${p.rating}</td><td>${p.wins}/${p.losses}/${p.draws}</td></tr>`).join('');
+		<tr class="${me && me.id === p.id ? 'me' : ''}"><td>${i + 1}</td><td class="name"><button class="link" data-user="${p.id}">${avatar(p.id)}${esc(p.username)}</button></td><td>${p.rating}</td><td>${p.wins}/${p.losses}/${p.draws}</td></tr>`).join('');
 	$('leader-rows').innerHTML = rows;
 	$('leader-empty').classList.toggle('hidden', !!rows);
 	$('leader-rows').querySelectorAll('[data-user]').forEach((b) => b.onclick = () => showProfile(b.dataset.user));
@@ -365,6 +421,7 @@ async function joinRoom(code, watch) {
 
 function enterRoom(roomId, token) {
 	clearInterval(lobbyTimer);
+	clearInterval(onlineTimer);
 	rid = roomId;
 	ptoken = token || null;
 	if (token) localStorage.setItem(`acidchess_room_${roomId}`, token);
@@ -373,6 +430,8 @@ function enterRoom(roomId, token) {
 	$('game').classList.remove('hidden');
 	st = null; viewPly = null; flipped = false; selected = null; lastResult = null;
 	$('chat-log').innerHTML = '';
+	chatSeen = null;
+	closeSheets();
 	if (events) events.close();
 	events = new EventSource(`/events?room_id=${roomId}${ptoken ? '' : '&watch=1'}`);
 	events.addEventListener('state', fetchState);
@@ -502,6 +561,11 @@ function viewedFen() {
 	return st.moves[viewPly - 1].fen || st.fen;
 }
 
+function shownMoves() {
+	// Our real moves on our turn, otherwise the preview of where our pieces could go
+	return st.turn === st.color ? st.legal : (st.preview || []);
+}
+
 function isLive() {
 	return viewPly === null || viewPly === st.moves.length;
 }
@@ -516,6 +580,17 @@ function render() {
 	renderMoves();
 	renderStatus();
 	renderRecon();
+	alignSide();
+	// Make it obvious when the move is ours: the board glows and the status turns into a green pill
+	const myTurn = !!st.color && !st.result && st.turn === st.color && (!!st.board4 || (!!st.players.w && !!st.players.b));
+	$('game').classList.toggle('my-turn', myTurn);
+	$('status').classList.toggle('turn', myTurn);
+}
+
+function alignSide() {
+	// Desktop: start the side panel level with the board squares, below the name bars or the 4-player list
+	const offset = $('board').closest('.board-wrap').offsetTop - document.querySelector('.board-col').offsetTop;
+	$('game').style.setProperty('--board-top', `${offset}px`);
 }
 
 // 4-player squares are drawn as if Red sits at the bottom, then turned a quarter turn per seat so your own army is at the bottom
@@ -528,7 +603,7 @@ function renderBoard4() {
 	const b = st.board4;
 	const turns = (FOUR.indexOf(st.color || 'r') + (flipped ? 2 : 0)) % 4;
 	const last = st.moves.length ? parseUci(st.moves[st.moves.length - 1].uci) : null;
-	const targets = selected !== null ? st.legal.map(parseUci).filter((m) => m && m.from === selected).map((m) => m.to) : [];
+	const targets = selected !== null ? shownMoves().map(parseUci).filter((m) => m && m.from === selected).map((m) => m.to) : [];
 	const el = $('board');
 	el.innerHTML = '';
 	el.classList.remove('sensing');
@@ -571,7 +646,7 @@ function renderFourPlayers() {
 		const diff = st.rating_diff && st.rating_diff[c] !== undefined ? ` ${st.rating_diff[c] >= 0 ? '+' : ''}${st.rating_diff[c]}` : '';
 		const tag = place ? ['', '1st', '2nd', '3rd', '4th'][place] : out ? 'out' : '';
 		return `<div class="fp${st.turn === c && !st.result ? ' turn' : ''}${out ? ' out' : ''}${c === st.color ? ' me' : ''}" data-color="${c}">
-			<span class="dot ${c}"></span><span class="pname">${esc(p ? p.name : 'Waiting…')}</span>
+			<span class="dot ${c}"></span>${avatar(p && p.user_id)}<span class="pname">${esc(p ? p.name : 'Waiting…')}</span>
 			<span class="prating">${p && p.rating ? `(${p.rating}${diff})` : ''}</span>
 			<span class="tag">${tag}</span><span class="clock"></span></div>`;
 	}).join('');
@@ -589,7 +664,7 @@ function renderBoard() {
 	const inCheck = live ? st.check : (ply > 0 && /[+#]$/.test(st.moves[ply - 1].san));
 	const king = turn === 'w' ? 'K' : 'k';
 	// selected is a square index, or a piece letter picked from the hand
-	const targets = live && selected !== null ? st.legal.map(parseUci).filter((m) => m && (typeof selected === 'string' ? m.drop === selected : m.from === selected)).map((m) => m.to) : [];
+	const targets = live && selected !== null ? shownMoves().map(parseUci).filter((m) => m && (typeof selected === 'string' ? m.drop === selected : m.from === selected)).map((m) => m.to) : [];
 	const hill = st.hill || [];
 	const ghosts = live && st.ghosts ? st.ghosts : {};
 	// Players see this turn's sense window; spectators and finished games see the sense made before the shown move
@@ -653,6 +728,7 @@ function renderBars() {
 		const bar = $(id);
 		const p = st.players[color];
 		bar.querySelector('.pname').textContent = p ? p.name : 'Waiting…';
+		setAvatar(bar.querySelector('.avatar'), p && p.user_id);
 		const diff = st.rating_diff && st.rating_diff[color] !== undefined ? ` ${st.rating_diff[color] >= 0 ? '+' : ''}${st.rating_diff[color]}` : '';
 		bar.querySelector('.prating').textContent = p && p.rating ? `(${p.rating}${diff})` : '';
 		// In Reconnaissance Blind the board only holds your own pieces until the game ends, so captures can't be counted from it
@@ -791,6 +867,7 @@ function renderStatus() {
 		$('btn-rematch').querySelector('.lbl').textContent = st.bot ? 'Play again' : asked ? 'Rematch sent' : theyAsked ? 'Accept rematch' : 'Rematch';
 	}
 	$('chat-input').classList.toggle('hidden', !mine || !!st.bot);
+	$('btn-open-chat').classList.toggle('hidden', !!st.bot);
 	$('btn-pgn').classList.toggle('hidden', !st.pgn);
 }
 
@@ -827,6 +904,7 @@ function renderStatusFour() {
 		$('btn-rematch').querySelector('.lbl').textContent = `Rematch ${st.rematch.length}/4`;
 	}
 	$('chat-input').classList.toggle('hidden', !mine);
+	$('btn-open-chat').classList.remove('hidden');
 	$('btn-pgn').classList.add('hidden');
 }
 
@@ -864,8 +942,25 @@ async function sense(square) {
 
 function renderChat() {
 	const log = $('chat-log');
-	log.innerHTML = st.chat.map((c) => `<div><b class="${c.color}">${esc(c.name)}:</b> ${esc(c.text)}</div>`).join('');
+	log.innerHTML = st.chat.map((c) => `<div>${avatar(c.user_id)}<b class="${c.color}">${esc(c.name)}:</b> ${esc(c.text)}</div>`).join('');
 	log.scrollTop = log.scrollHeight;
+	if (chatSeen === null || $('sheet-chat').classList.contains('open')) chatSeen = st.chat.length;
+	const fresh = st.chat.length - chatSeen;
+	$('chat-badge').textContent = fresh;
+	$('chat-badge').classList.toggle('hidden', fresh <= 0);
+}
+
+function openSheet(id) {
+	$(id).classList.add('open');
+	if (id === 'sheet-chat') {
+		if (st) chatSeen = st.chat.length;
+		$('chat-badge').classList.add('hidden');
+		$('chat-log').scrollTop = $('chat-log').scrollHeight;
+	}
+}
+
+function closeSheets() {
+	document.querySelectorAll('.sheet.open').forEach((el) => el.classList.remove('open'));
 }
 
 function showResult() {
@@ -981,7 +1076,11 @@ function onPointerDown(e) {
 	if (!sqEl) return;
 	const i = +sqEl.dataset.sq;
 	if (sensing()) return sense(sqName(i));
-	if (!canMove()) return;
+	if (!canMove()) {
+		// Not our turn: tapping one of our pieces only shows where it could go
+		if (st.color && !st.result && isLive() && (st.preview || []).length) { selected = ownPiece(i) && selected !== i ? i : null; renderBoard(); }
+		return;
+	}
 	if (typeof selected === 'string') {
 		// A piece from the hand is waiting for a square
 		const drop = legalFrom(selected, i);
@@ -1103,6 +1202,23 @@ function init() {
 	const closeTwists = () => $('twists-modal').classList.add('hidden');
 	$('btn-twists').onclick = () => $('twists-modal').classList.remove('hidden');
 	$('twists-done').onclick = closeTwists;
+	$('twists-random').onclick = () => {
+		// Tick 1-3 random twists that work together: explosions and drops never both, and at most one piece swap
+		const boxes = [...document.querySelectorAll('#create-twists input')];
+		boxes.forEach((c) => { c.checked = false; c.disabled = false; });
+		const pool = boxes.sort(() => Math.random() - 0.5);
+		const want = 1 + Math.floor(Math.random() * 3);
+		const picked = [];
+		for (const c of pool) {
+			if (picked.length === want) break;
+			const has = (t) => picked.some((p) => p.dataset.toggle === t);
+			if ((c.dataset.toggle === 'atomic' && has('drops')) || (c.dataset.toggle === 'drops' && has('atomic'))) continue;
+			if (c.dataset.swap && picked.some((p) => p.dataset.swap)) continue;
+			picked.push(c);
+		}
+		picked.forEach((c) => { c.checked = true; });
+		syncTwists();
+	};
 	$('twists-close').onclick = closeTwists;
 	$('twists-modal').onclick = (e) => { if (e.target === $('twists-modal')) closeTwists(); };
 
@@ -1121,6 +1237,23 @@ function init() {
 		if (e.key === 'f') { flipped = !flipped; render(); }
 	});
 	$('btn-flip').onclick = () => { flipped = !flipped; render(); };
+	$('btn-flip-m').onclick = () => { flipped = !flipped; render(); };
+	const showMoves = (on) => {
+		document.querySelector('.side').classList.toggle('moves-off', !on);
+		$('btn-toggle-moves').classList.toggle('off', !on);
+		$('btn-toggle-moves').title = on ? 'Hide move list' : 'Show move list';
+	};
+	showMoves(localStorage.getItem('acidchess_moves') !== 'off');
+	$('btn-toggle-moves').onclick = () => {
+		const on = document.querySelector('.side').classList.contains('moves-off');
+		localStorage.setItem('acidchess_moves', on ? 'on' : 'off');
+		showMoves(on);
+	};
+	$('btn-open-moves').onclick = () => openSheet('sheet-moves');
+	$('btn-open-chat').onclick = () => openSheet('sheet-chat');
+	document.querySelectorAll('[data-close-sheet]').forEach((b) => b.onclick = closeSheets);
+	// Picking a move to replay closes the phone sheet so the board shows that position
+	$('moves').addEventListener('click', (e) => { if (e.target.closest('.mv') && !$('moves').classList.contains('four')) closeSheets(); });
 	$('btn-abort').onclick = () => action('/abort');
 	$('btn-draw').onclick = () => action('/draw', { action: 'offer' });
 	$('btn-draw-accept').onclick = () => action('/draw', { action: 'accept' });
@@ -1143,6 +1276,7 @@ function init() {
 
 	// Browsers only allow sound after the page has been tapped or clicked
 	document.addEventListener('pointerdown', () => { if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)(); }, { once: true });
+	window.addEventListener('resize', () => { if (st) alignSide(); });
 	document.addEventListener('visibilitychange', () => { if (!document.hidden && unread) { unread = 0; render(); } });
 	$('btn-sound').onclick = () => { localStorage.setItem('acidchess_sound', soundOn() ? 'off' : 'on'); renderAlerts(); play('move'); };
 	$('btn-notify').onclick = async () => {

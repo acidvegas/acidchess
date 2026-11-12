@@ -11,19 +11,22 @@ import secrets
 import threading
 import time
 
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, send_from_directory
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import ai
+import arcade
 import engine
 import fourgame
 import game as chess_game
 import toggles
 from auth import USERNAME_RE, captcha_create, captcha_verify, create_session, delete_session, request_token, request_user
-from storage import DB_LOCK, db_connect, delete_room, get_user, init_db, leaderboard, load_rooms, prune_sessions, save_room
+from storage import DB_LOCK, db_connect, delete_room, delete_user, get_user, init_db, leaderboard, load_rooms, mirror_user, prune_sessions, save_room, summary
 
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1) # https links in the page metadata behind nginx
 
 CACHE_VERSION     = int(time.time())
 ROOMS_LOCK        = threading.RLock()
@@ -52,6 +55,41 @@ def api_error(message: str, status: int = 400) -> tuple:
 	return jsonify({'error': message}), status
 
 
+def arcade_reply(reply: dict) -> Response:
+	'''Answer a sign-in from acid-arcade-db and share it with the other sites on this domain.'''
+
+	resp = jsonify(reply)
+	arcade.set_cookie(resp, request.host, reply['token'])
+	return resp
+
+
+def arcade_sync():
+	'''Background loop: every minute, pick up renamed and deleted accounts from acid-arcade-db.'''
+
+	since = 0
+	while True:
+		try:
+			data  = arcade.changes(since)
+			since = data['now']
+			for user in data['changed']:
+				mirror_user(user['user_id'], user['username'], create=False)
+				with ROOMS_LOCK:
+					for room in rooms.values():
+						seats = [p for p in room['players'].values() if p and p['user_id'] == user['user_id']]
+						lines = [m for m in room['chat'] if m.get('user_id') == user['user_id']]
+						if not seats and not lines:
+							continue
+						for item in seats + lines:
+							item['name'] = user['username']
+						save_room(room['id'], room)
+						notify(room['id'])
+			for user_id in data['deleted']:
+				delete_user(user_id)
+		except Exception as e:
+			print(f'arcade sync error: {e}')
+		time.sleep(60)
+
+
 def bot_turn(rid: str, game: dict, color: str, level: int):
 	'''Background thread: get the computer's move and play it, unless the game moved on meanwhile.'''
 
@@ -76,6 +114,11 @@ def changed(room: dict):
 	'''Save a room and push the change to everyone watching it.'''
 
 	room['last_activity'] = time.time()
+	game = room['game']
+	# Rated and computer games change a player's acid-arcade-db summary, so send it once when they end
+	if arcade.enabled() and game['result'] and game['result'] != '*' and (room['rated'] or room.get('bot')) and not game.get('stats_pushed'):
+		game['stats_pushed'] = True
+		push_stats([p['user_id'] for p in room['players'].values() if p and p['user_id']])
 	save_room(room['id'], room)
 	notify(room['id'])
 
@@ -193,6 +236,20 @@ def player_name() -> tuple:
 	return clean_name((request.get_json(silent=True) or {}).get('name')), None
 
 
+def push_stats(user_ids: list):
+	'''Send players' summaries to acid-arcade-db from a background thread, so a failed push never holds up a game.'''
+
+	def send():
+		names = {k: m['name'] for k, m in chess_game.MODES.items()}
+		for user_id in user_ids:
+			try:
+				arcade.push_stats(user_id, *summary(user_id, names))
+			except Exception as e:
+				print(f'push_stats({user_id}) failed: {e}')
+
+	threading.Thread(target=send, daemon=True).start()
+
+
 def reap():
 	'''Drop rooms nobody has touched in a day, and finished or never-started rooms after an hour.'''
 
@@ -241,7 +298,10 @@ def ticker():
 def index(rid: str = None):
 	'''Serve the single page app.'''
 
-	return render_template('index.html', cache_v=CACHE_VERSION)
+	if rid and (len(rid) != ROOM_ID_LEN or not all(c in ROOM_ID_CHARS for c in rid.lower())):
+		return 'Not found', 404
+
+	return render_template('index.html', cache_v=CACHE_VERSION, url=request.url_root, room=bool(rid), arcade=arcade.public_url(request.host) if arcade.enabled() else '')
 
 
 @app.route('/abort', methods=['POST'])
@@ -259,10 +319,46 @@ def abort():
 	return jsonify({'ok': True})
 
 
+@app.route('/active', methods=['POST'])
+@rooms_locked
+def active():
+	'''List the unfinished games the caller has a seat in: by account when signed in, and by the room tokens this browser kept.'''
+
+	user_id, _ = request_user()
+	tokens     = (request.get_json(silent=True) or {}).get('tokens')
+	tokens     = tokens if isinstance(tokens, dict) else {}
+	out        = []
+	for room in rooms.values():
+		if room['game']['result']:
+			continue
+		for color in chess_game.seats(room):
+			seat = room['players'][color]
+			if seat and seat['token'] and ((user_id and seat['user_id'] == user_id) or tokens.get(room['id']) == seat['token']):
+				out.append({'room_id': room['id'], 'player_token': seat['token'], 'mode': chess_game.MODES[chess_game.mode(room)]['name'], 'tc': room['tc'], 'opponents': [p['name'] for c, p in room['players'].items() if p and c != color]})
+				break
+	return jsonify({'rooms': out})
+
+
+@app.errorhandler(arcade.ArcadeDown)
+def arcade_down(e: arcade.ArcadeDown) -> tuple:
+	'''Answer 503 while acid-arcade-db is unreachable, there is no fallback to guest.'''
+
+	return api_error('account server is down', 503)
+
+
+@app.errorhandler(arcade.ArcadeError)
+def arcade_error(e: arcade.ArcadeError) -> tuple:
+	'''Pass on an error acid-arcade-db gave.'''
+
+	return api_error(str(e), e.status)
+
+
 @app.route('/auth/captcha')
 def auth_captcha():
 	'''Return a new captcha.'''
 
+	if arcade.enabled():
+		return jsonify(arcade.captcha())
 	return jsonify(captcha_create())
 
 
@@ -271,6 +367,8 @@ def auth_login():
 	'''Log in with username and password.'''
 
 	data = request.get_json(silent=True) or {}
+	if arcade.enabled():
+		return arcade_reply(arcade.login(data.get('username') or '', data.get('password') or '', request.remote_addr))
 	with db_connect() as c:
 		row = c.execute('SELECT id, username, password_hash FROM users WHERE username=?', (data.get('username') or '',)).fetchone()
 	if not row or not check_password_hash(row['password_hash'], data.get('password') or ''):
@@ -282,8 +380,14 @@ def auth_login():
 def auth_logout():
 	'''Log out the current session.'''
 
-	delete_session(request_token())
-	return jsonify({'ok': True})
+	if not arcade.enabled():
+		delete_session(request_token())
+		return jsonify({'ok': True})
+	if request_token():
+		arcade.logout(request_token())
+	resp = jsonify({'ok': True})
+	arcade.clear_cookie(resp, request.host)
+	return resp
 
 
 @app.route('/auth/me')
@@ -291,7 +395,11 @@ def auth_me():
 	'''Return the signed in user, if any.'''
 
 	user_id, _ = request_user()
-	return jsonify({'user': get_user(user_id) if user_id else None})
+	resp       = jsonify({'user': get_user(user_id) if user_id else None})
+	# Players signed in before shared sign-in existed start sharing it here
+	if arcade.enabled() and user_id and not request.cookies.get(arcade.COOKIE):
+		arcade.set_cookie(resp, request.host, request_token())
+	return resp
 
 
 @app.route('/auth/signup', methods=['POST'])
@@ -301,6 +409,8 @@ def auth_signup():
 	data     = request.get_json(silent=True) or {}
 	username = (data.get('username') or '').strip()
 	password = data.get('password') or ''
+	if arcade.enabled():
+		return arcade_reply(arcade.signup(username, password, data.get('captcha_id') or '', data.get('captcha') or '', request.remote_addr))
 	if not captcha_verify(data.get('captcha_id'), data.get('captcha')):
 		return api_error('wrong captcha')
 	if not USERNAME_RE.match(username):
@@ -312,6 +422,20 @@ def auth_signup():
 			return api_error('username taken')
 		user_id = c.execute('INSERT INTO users(username, password_hash, created_at) VALUES(?, ?, ?)', (username, generate_password_hash(password), int(time.time()))).lastrowid
 	return jsonify({'token': create_session(user_id), 'username': username, 'user_id': user_id})
+
+
+@app.route('/auth/sso')
+def auth_sso():
+	'''Swap the shared sign-in cookie set by any acid-arcade-db site on this domain for a session here.'''
+
+	if not arcade.enabled():
+		return 'Not found', 404 # standalone sites have no shared sign-in
+	reply = arcade.sso(request.cookies.get(arcade.COOKIE))
+	if not reply:
+		resp = jsonify({'error': 'not signed in'})
+		arcade.clear_cookie(resp, request.host)
+		return resp, 401
+	return jsonify(reply)
 
 
 @app.route('/chat', methods=['POST'])
@@ -331,7 +455,7 @@ def chat():
 	if len(times) >= CHAT_RATE_MAX:
 		return api_error('slow down')
 	CHAT_TIMES[key] = times + [now]
-	room['chat'].append({'name': room['players'][color]['name'], 'color': color, 'text': text, 'at': now})
+	room['chat'].append({'name': room['players'][color]['name'], 'user_id': room['players'][color]['user_id'], 'color': color, 'text': text, 'at': now})
 	room['chat'] = room['chat'][-chess_game.CHAT_MAX:]
 	changed(room)
 	return jsonify({'ok': True})
@@ -350,8 +474,8 @@ def create():
 	options        = toggles.clean(data.get('toggles'))
 	if game_mode not in chess_game.MODES:
 		return api_error('unknown mode')
-	if options and (game_mode in ('recon', 'four', 'teams') or bot is not None):
-		return api_error('twists are not available for this game yet')
+	if game_mode in ('recon', 'four', 'teams') or bot is not None:
+		options = {} # these games have no twists yet, so any left ticked from another mode are dropped
 	# Twisted games are casual so each mode's rating stays comparable
 	rated = rated and not options
 	if bot is not None:
@@ -442,6 +566,13 @@ def events():
 	return Response(stream(), mimetype='text/event-stream', headers={'Cache-Control': 'no-cache, no-transform, no-store', 'X-Accel-Buffering': 'no'})
 
 
+@app.route('/favicon.ico')
+def favicon():
+	'''Serve the PNG icon for clients that only look for /favicon.ico.'''
+
+	return send_from_directory(app.static_folder, 'icon-192.png', mimetype='image/png')
+
+
 @app.route('/join', methods=['POST'])
 @rooms_locked
 def join():
@@ -482,7 +613,7 @@ def lobby():
 			continue
 		color = next(c for c, p in room['players'].items() if p)
 		host  = room['players'][color]
-		out.append({'room_id': room['id'], 'mode': chess_game.mode(room), 'toggles': room.get('toggles', {}), 'name': host['name'], 'rating': host['rating'], 'host_color': color, 'seated': sum(1 for p in room['players'].values() if p), 'seats': len(room['players']), 'tc': room['tc'], 'rated': room['rated'], 'created_at': room['created_at']})
+		out.append({'room_id': room['id'], 'mode': chess_game.mode(room), 'toggles': room.get('toggles', {}), 'name': host['name'], 'user_id': host['user_id'], 'rating': host['rating'], 'host_color': color, 'seated': sum(1 for p in room['players'].values() if p), 'seats': len(room['players']), 'tc': room['tc'], 'rated': room['rated'], 'created_at': room['created_at']})
 	out.sort(key=lambda r: r['created_at'], reverse=True)
 	return jsonify({'rooms': out, 'time_controls': list(chess_game.TIME_CONTROLS), 'bot': ai.available(), 'modes': [[k, m['name']] for k, m in chess_game.MODES.items()], 'swaps': [[k, s[0]] for k, s in toggles.SWAPS.items()]})
 
@@ -502,6 +633,14 @@ def move():
 	changed(room)
 	maybe_bot(room)
 	return jsonify(chess_game.state(room, room['players'][color]['token']))
+
+
+@app.route('/online')
+def online():
+	'''Count the live room connections (players and spectators) and the rooms they are in.'''
+
+	with SUBSCRIBERS_LOCK:
+		return jsonify({'players': sum(len(qs) for qs in SUBSCRIBERS.values()), 'rooms': sum(1 for qs in SUBSCRIBERS.values() if qs)})
 
 
 @app.route('/quickplay', methods=['POST'])
@@ -584,6 +723,13 @@ def resign():
 	return jsonify({'ok': True})
 
 
+@app.route('/robots.txt')
+def robots():
+	'''Let crawlers in and point them at the sitemap.'''
+
+	return Response(f'User-agent: *\nAllow: /\nSitemap: {request.url_root}sitemap.xml\n', mimetype='text/plain')
+
+
 @app.route('/sense', methods=['POST'])
 @rooms_locked
 def sense():
@@ -597,6 +743,13 @@ def sense():
 		return api_error(error)
 	changed(room)
 	return jsonify(chess_game.state(room, room['players'][color]['token']))
+
+
+@app.route('/sitemap.xml')
+def sitemap():
+	'''List the home page, the only page worth indexing.'''
+
+	return Response(f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>{request.url_root}</loc></url></urlset>\n', mimetype='application/xml')
 
 
 @app.route('/state')
@@ -624,6 +777,8 @@ def user_profile(user_id: int):
 
 atexit.register(lambda: [save_room(rid, room) for rid, room in list(rooms.items())])
 threading.Thread(target=ticker, daemon=True).start()
+if arcade.enabled():
+	threading.Thread(target=arcade_sync, daemon=True).start()
 
 
 

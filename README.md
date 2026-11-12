@@ -130,6 +130,22 @@ mkdir -p engines && cp .build/Fairy-Stockfish/src/stockfish engines/fairy-stockf
 
 This builds the `acidchess` image *(including Fairy-Stockfish)* and starts a container bound to `127.0.0.1:20001` with the `acidchess_data` volume mounted at `/data`.
 
+## acid-arcade-db
+
+acidchess can optionally share accounts with the other acid arcade games through [acid-arcade-db](../acid-arcade-db). Without it the game keeps its own accounts as described above, so nothing else is needed to run it.
+
+Set these environment variables to turn it on:
+
+| Variable            | Meaning                                                                                                                                                                                                                                        |
+|---------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `ARCADE_URL`        | Internal API of acid-arcade-db *(e.g. `http://acid-arcade-db:20021`)*, turns the mode on                                                                                                                                                       |
+| `ARCADE_PUBLIC_URL` | Public acid-arcade-db site, used for profile pictures and the account settings link. `{domain}` is replaced with the player's parent domain *(e.g. `https://arcade.{domain}` on `chess.supernets.org` becomes `https://arcade.supernets.org`)* |
+| `ARCADE_GAME`       | This game's slug in acid-arcade-db, `chess`                                                                                                                                                                                                    |
+
+In this mode sign up, log in and log out go to acid-arcade-db, so the same username and password work on every game. Signing in or out on one site of a domain *(e.g. `chess.acid.vegas`)* does the same on the other sites of that domain through a shared cookie. Password, picture and account deletion are managed on the acid-arcade-db site. Ratings and games stay in this game's database, and each player's Elo and record are sent to acid-arcade-db after every rated or computer game. Renames and deleted accounts are picked up once a minute. If acid-arcade-db is down, requests that need an account answer `503`.
+
+With `ARCADE_URL` exported, `./setup.sh` also puts the container on the `arcade` Docker network and passes the variables above *(`ARCADE_PUBLIC_URL` defaults to `https://arcade.{domain}`)*.
+
 ## Tests
 
 ```bash
@@ -137,6 +153,7 @@ python3 tests/test_engine.py
 .venv/bin/python tests/test_app.py
 python3 tests/test_variants.py
 python3 tests/test_four.py
+.venv/bin/python tests/test_arcade.py
 PERFT_DEPTH=5 python3 -m unittest tests.test_engine.TestEngine.test_perft
 ```
 
@@ -156,6 +173,7 @@ PERFT_DEPTH=5 python3 -m unittest tests.test_engine.TestEngine.test_perft
 | `acidchess/toggles.py`  | Twists that change the start position: holes, random armies, swaps, bonus squares                     |
 | `acidchess/storage.py`  | SQLite storage for users, games, rooms and Elo                                                        |
 | `acidchess/auth.py`     | Sessions and captcha                                                                                  |
+| `acidchess/arcade.py`   | acid-arcade-db client, copied unchanged from acid-arcade-db                                           |
 | `acidchess/static/`     | `utils.js`, `style.css` and piece images                                                              |
 | `acidchess/templates/`  | `index.html`                                                                                          |
 | `tests/`                | Perft, variant cross-checks against Fairy-Stockfish, 4-player rules and HTTP API tests                |

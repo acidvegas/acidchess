@@ -266,7 +266,7 @@ class TestApp(unittest.TestCase):
 
 
 	def test_toggles(self):
-		'''Twisted games get a new random layout every game, are always casual, and are refused where they aren't supported yet.'''
+		'''Twisted games get a new random layout every game, are always casual, and are dropped where they aren't supported yet.'''
 
 		token = self.signup('twister')
 		a = self.call('/create', {'mode': 'big8', 'color': 'w', 'rated': True, 'toggles': {'holes': True, 'armies': True, 'swaps': ['amazon', 'nightriders', 'grasshoppers', 'nope'], 'junk': 1}}, token)
@@ -278,8 +278,10 @@ class TestApp(unittest.TestCase):
 		rows = s['start_fen'].split()[0].split('/')
 		self.assertEqual(rows[0], rows[-1].lower())
 		self.assertNotIn('N', rows[-1])
-		self.assertEqual(self.call('/create', {'mode': 'recon', 'toggles': {'holes': True}})['error'], 'twists are not available for this game yet')
-		self.assertEqual(self.call('/create', {'bot': 2, 'toggles': {'armies': True}})['error'], 'twists are not available for this game yet')
+		for body in ({'mode': 'recon', 'toggles': {'holes': True}}, {'mode': 'four', 'toggles': {'koth': True}}):
+			r = self.call('/create', body)
+			self.assertIn('room_id', r, r)
+			self.assertFalse(self.call(f'/state?room_id={r["room_id"]}', player_token=r['player_token']).get('toggles'))
 		self.call('/resign', {'room_id': a['room_id'], 'player_token': a['player_token']})
 		self.call('/rematch', {'room_id': a['room_id'], 'player_token': a['player_token']})
 		self.call('/rematch', {'room_id': a['room_id'], 'player_token': b['player_token']})

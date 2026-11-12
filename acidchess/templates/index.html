@@ -6,15 +6,33 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 	<meta name="theme-color" content="#08080f">
-	<title>acidchess</title>
+	<title>acidchess - online chess with twists, bots and 4-player</title>
+	<meta name="description" content="Play chess online for free: quick play, 8 computer levels, Reconnaissance Blind, big boards, 4-player and 2v2, plus twists like king of the hill, three-check and drops. Open source, no install.">
+	{% if room %}<meta name="robots" content="noindex">{% else %}<link rel="canonical" href="{{ url }}">{% endif %}
+	<meta property="og:type" content="website">
+	<meta property="og:site_name" content="acidchess">
+	<meta property="og:title" content="acidchess">
+	<meta property="og:description" content="Online chess with twists, bots and 4-player. Free and open source.">
+	<meta property="og:url" content="{{ url }}">
+	<meta property="og:image" content="{{ url }}static/og.png">
+	<meta property="og:image:width" content="1200">
+	<meta property="og:image:height" content="630">
+	<meta property="og:image:alt" content="A chess board with the pieces lined up">
+	<meta name="twitter:card" content="summary_large_image">
+	<meta name="twitter:title" content="acidchess">
+	<meta name="twitter:description" content="Online chess with twists, bots and 4-player. Free and open source.">
+	<meta name="twitter:image" content="{{ url }}static/og.png">
 	<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}?v={{ cache_v }}">
 	<link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}?v={{ cache_v }}">
 	<link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}?v={{ cache_v }}">
 	<meta name="apple-mobile-web-app-title" content="acidchess">
 	<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ cache_v }}">
 </head>
-<body>
+<body data-arcade="{{ arcade }}">
 	<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
 		<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></symbol>
 		<symbol id="i-cpu" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></symbol>
@@ -51,17 +69,20 @@
 		<symbol id="i-mute" viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4zM17 9l5 6M22 9l-5 6"/></symbol>
 		<symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 21h4"/></symbol>
 		<symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.2v.3"/></symbol>
+		<symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></symbol>
+		<symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+		<symbol id="i-dice" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="15" cy="15" r="1.2" fill="currentColor"/></symbol>
 		<symbol id="i-bell-off" viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 9.5-4.9M18 11v5l2 2H8M10 21h4M3 3l18 18"/></symbol>
 	</svg>
 
 	<header class="topbar">
-		<a class="logo" href="/"><svg class="ico logo-ico"><use href="#i-knight"/></svg>acid<span>chess</span></a>
+		<h1 class="logo-h"><a class="logo" href="/"><svg class="ico logo-ico"><use href="#i-knight"/></svg>acid<span>chess</span></a></h1>
 		<div class="account">
 			<button class="icon-btn" id="btn-help" title="How to play"><svg class="ico"><use href="#i-help"/></svg></button>
-			<svg class="ico"><use href="#i-user"/></svg><span id="account-name">Guest</span>
-			<button class="link" id="btn-signin"><svg class="ico"><use href="#i-login"/></svg>Sign in</button>
-			<button class="link hidden" id="btn-profile"><svg class="ico"><use href="#i-chart"/></svg>Stats</button>
-			<button class="link hidden" id="btn-logout"><svg class="ico"><use href="#i-logout"/></svg>Log out</button>
+			<svg class="ico" id="account-icon"><use href="#i-user"/></svg><img class="avatar hidden" id="account-avatar" alt=""><span id="account-name">Guest</span>
+			<button class="icon-btn" id="btn-signin" title="Sign in" aria-label="Sign in"><svg class="ico"><use href="#i-login"/></svg></button>
+			<button class="icon-btn hidden" id="btn-profile" title="Stats" aria-label="Stats"><svg class="ico"><use href="#i-chart"/></svg></button>
+			<button class="icon-btn hidden" id="btn-logout" title="Log out" aria-label="Log out"><svg class="ico"><use href="#i-logout"/></svg></button>
 		</div>
 	</header>
 
@@ -112,6 +133,8 @@
 				<table class="list"><thead><tr><th>#</th><th>Player</th><th>Rating</th><th>W/L/D</th></tr></thead><tbody id="leader-rows"></tbody></table>
 				<p class="empty hidden" id="leader-empty">No rated games yet.</p>
 			</div>
+			<div class="active-games hidden" id="active-games"></div>
+			<p class="online" id="home-online">…</p>
 		</section>
 	</main>
 
@@ -119,14 +142,14 @@
 		<div class="board-col">
 			<div id="four-players" class="four-players hidden"></div>
 			<div class="player-bar" id="bar-top">
-				<span class="pname"></span><span class="prating"></span><span class="checks"></span><span class="captured"></span><span class="clock"></span>
+				<img class="avatar hidden" alt=""><span class="pname"></span><span class="prating"></span><span class="checks"></span><span class="captured"></span><span class="clock"></span>
 			</div>
 			<div class="board-wrap">
 				<div id="board"></div>
 				<div id="promotion" class="hidden"></div>
 			</div>
 			<div class="player-bar" id="bar-bottom">
-				<span class="pname"></span><span class="prating"></span><span class="checks"></span><span class="captured"></span><span class="clock"></span>
+				<img class="avatar hidden" alt=""><span class="pname"></span><span class="prating"></span><span class="checks"></span><span class="captured"></span><span class="clock"></span>
 			</div>
 		</div>
 
@@ -134,14 +157,16 @@
 			<div class="room-info">
 				<span class="room-code"><svg class="ico"><use href="#i-hash"/></svg><span id="room-code"></span></span>
 				<span id="room-mode"></span>
-				<button class="link" id="btn-copy-link"><svg class="ico"><use href="#i-link"/></svg>Copy link</button>
+				<button class="link" id="btn-copy-link" title="Copy link"><svg class="ico"><use href="#i-link"/></svg><span class="lbl">Copy link</span></button>
+			</div>
+			<div class="status-row">
+				<div id="status" class="status"></div>
 				<span class="alerts">
 					<button class="icon-btn" id="btn-sound" title="Sounds"><svg class="ico"><use href="#i-sound"/></svg></button>
 					<button class="icon-btn" id="btn-game-help" title="Rules for this game"><svg class="ico"><use href="#i-help"/></svg></button>
 					<button class="icon-btn" id="btn-notify" title="Desktop notifications"><svg class="ico"><use href="#i-bell-off"/></svg></button>
 				</span>
 			</div>
-			<div id="status" class="status"></div>
 			<div id="recon-bar" class="offer hidden">
 				<span id="recon-hint"></span>
 				<button class="btn small" id="btn-skip-sense"><svg class="ico"><use href="#i-skip"/></svg>Skip sense</button>
@@ -153,24 +178,34 @@
 				<button class="btn small" id="btn-draw-accept"><svg class="ico"><use href="#i-check"/></svg>Accept</button>
 				<button class="btn small" id="btn-draw-decline"><svg class="ico"><use href="#i-x"/></svg>Decline</button>
 			</div>
-			<div class="moves" id="moves"></div>
-			<div class="nav">
-				<button class="btn small" data-nav="first" title="First move"><svg class="ico"><use href="#i-first"/></svg></button>
-				<button class="btn small" data-nav="prev" title="Prev move"><svg class="ico"><use href="#i-prev"/></svg></button>
-				<button class="btn small" data-nav="next" title="Next move"><svg class="ico"><use href="#i-next"/></svg></button>
-				<button class="btn small" data-nav="last" title="Last move"><svg class="ico"><use href="#i-last"/></svg></button>
-				<button class="btn small" id="btn-flip" title="Flip board"><svg class="ico"><use href="#i-flip"/></svg></button>
+			<div class="sheet" id="sheet-moves">
+				<div class="sheet-head"><span>Moves</span><button class="icon-btn" data-close-sheet title="Close" aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button></div>
+				<div class="moves" id="moves"></div>
+				<div class="nav">
+					<button class="btn small" data-nav="first" title="First move"><svg class="ico"><use href="#i-first"/></svg></button>
+					<button class="btn small" data-nav="prev" title="Prev move"><svg class="ico"><use href="#i-prev"/></svg></button>
+					<button class="btn small" data-nav="next" title="Next move"><svg class="ico"><use href="#i-next"/></svg></button>
+					<button class="btn small" data-nav="last" title="Last move"><svg class="ico"><use href="#i-last"/></svg></button>
+					<button class="btn small" id="btn-flip" title="Flip board"><svg class="ico"><use href="#i-flip"/></svg></button>
+					<button class="btn small desk-only" id="btn-toggle-moves" title="Hide move list"><svg class="ico"><use href="#i-list"/></svg></button>
+				</div>
 			</div>
 			<div class="actions">
-				<button class="btn" id="btn-abort"><svg class="ico"><use href="#i-x"/></svg><span class="lbl">Abort</span></button>
-				<button class="btn" id="btn-draw"><svg class="ico"><use href="#i-scale"/></svg><span class="lbl">Offer draw</span></button>
-				<button class="btn danger" id="btn-resign"><svg class="ico"><use href="#i-flag"/></svg><span class="lbl">Resign</span></button>
+				<button class="btn mobile-only" id="btn-open-moves" title="Moves" aria-label="Moves"><svg class="ico"><use href="#i-list"/></svg></button>
+				<button class="btn mobile-only" id="btn-open-chat" title="Chat" aria-label="Chat"><svg class="ico"><use href="#i-chat"/></svg><span class="badge hidden" id="chat-badge"></span></button>
+				<button class="btn mobile-only" id="btn-flip-m" title="Flip board" aria-label="Flip board"><svg class="ico"><use href="#i-flip"/></svg></button>
+				<button class="btn" id="btn-abort" title="Abort"><svg class="ico"><use href="#i-x"/></svg><span class="lbl">Abort</span></button>
+				<button class="btn" id="btn-draw" title="Offer draw"><svg class="ico"><use href="#i-scale"/></svg><span class="lbl">Offer draw</span></button>
+				<button class="btn danger" id="btn-resign" title="Resign"><svg class="ico"><use href="#i-flag"/></svg><span class="lbl">Resign</span></button>
 				<button class="btn primary hidden" id="btn-rematch"><svg class="ico"><use href="#i-rematch"/></svg><span class="lbl">Rematch</span></button>
-				<button class="btn" id="btn-pgn"><svg class="ico"><use href="#i-copy"/></svg>Copy PGN</button>
+				<button class="btn" id="btn-pgn" title="Copy PGN"><svg class="ico"><use href="#i-copy"/></svg><span class="lbl">Copy PGN</span></button>
 			</div>
-			<div class="chat">
-				<div class="chat-log" id="chat-log"></div>
-				<input type="text" id="chat-input" maxlength="200" placeholder="Say something" autocomplete="off">
+			<div class="sheet" id="sheet-chat">
+				<div class="sheet-head"><span>Chat</span><button class="icon-btn" data-close-sheet title="Close" aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button></div>
+				<div class="chat">
+					<div class="chat-log" id="chat-log"></div>
+					<input type="text" id="chat-input" maxlength="200" placeholder="Say something" autocomplete="off">
+				</div>
 			</div>
 		</aside>
 	</main>
@@ -201,7 +236,10 @@
 				<label class="check"><input type="checkbox" data-toggle="bonus"> <span>Bonus squares <small>(★ upgrades a piece once)</small></span></label>
 				<div id="swap-list"></div>
 			</div>
-			<button class="btn primary" id="twists-done"><svg class="ico"><use href="#i-check"/></svg>Done</button>
+			<div class="row">
+				<button class="btn" id="twists-random" title="Pick 1-3 random twists"><svg class="ico"><use href="#i-dice"/></svg>Random</button>
+				<button class="btn primary" id="twists-done"><svg class="ico"><use href="#i-check"/></svg>Done</button>
+			</div>
 		</div>
 	</div>
 
@@ -251,7 +289,7 @@
 				<li data-piece="C"><img src="/static/pieces/wC.svg" alt=""><span><b>Chancellor</b> rook + knight</span></li>
 				<li data-piece="M"><img src="/static/pieces/wM.svg" alt=""><span><b>Amazon</b> queen + knight</span></li>
 				<li data-piece="O"><img src="/static/pieces/wO.svg" alt=""><span><b>Cannon</b> moves like a rook, captures only by jumping exactly one piece</span></li>
-				<li data-piece="G"><img src="/static/pieces/wG.svg" alt=""><span><b>Grasshopper</b> hops the first piece on a queen line, landing right behind it</span></li>
+				<li data-piece="G"><img src="/static/pieces/wG.svg" alt=""><span><b>Grasshopper</b> in any of the 8 queen directions, jumps over the first piece it meets and lands on the square just past it. If an enemy is on that square, it's captured</span></li>
 				<li data-piece="H"><img src="/static/pieces/wH.svg" alt=""><span><b>Nightrider</b> repeats a knight jump in a straight line until blocked</span></li>
 				<li data-piece="L"><img src="/static/pieces/wL.svg" alt=""><span><b>Camel</b> leaps 3 squares one way and 1 the other</span></li>
 				</ul>

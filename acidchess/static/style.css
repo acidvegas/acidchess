@@ -13,7 +13,7 @@
 	--light   : #f0d9b5;
 	--dark    : #b58863;
 	--side    : clamp(300px, 22vw, 440px);
-	--board   : min(92vw, calc((100dvh - 88px - 112px * var(--ui)) / var(--ratio)), calc(100vw - var(--side) - 64px));
+	--board   : min(92vw, calc((100dvh - 88px - 62px * var(--ui)) / var(--ratio)), calc(100vw - var(--side) - 64px));
 	--ratio   : 1;
 	--ui      : 1; /* zoom for the home screen, top bar and footer on big windows */
 }
@@ -76,6 +76,7 @@ input:focus, select:focus { border-color: var(--accent); }
 }
 
 .logo, .account, .site-footer { zoom: var(--ui); }
+.logo-h { margin: 0; font-size: inherit; font-weight: inherit; }
 .logo { font-size: 22px; font-weight: 800; color: var(--text); text-decoration: none; letter-spacing: 0.5px; }
 .logo span { color: var(--accent); }
 .account { display: flex; gap: 10px; align-items: center; color: var(--dim); flex-wrap: wrap; justify-content: flex-end; }
@@ -153,7 +154,32 @@ label.check:has(input:disabled) { color: var(--dim); cursor: not-allowed; }
 .list th, .list td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
 .list th { color: var(--dim); font-weight: 400; font-size: 13px; }
 .list tr.me td { color: var(--accent); }
+@media (max-width: 480px) {
+	/* Phones: drop the lobby rating, shrink Join to its icon, and cut long names short */
+	#tab-lobby .list th:nth-child(2), #tab-lobby .list td:nth-child(2) { display: none; }
+	#tab-lobby .list td:last-child .lbl { display: none; }
+	.list td.name { max-width: 0; width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.list td.name .link { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+	#tab-lobby .list { table-layout: fixed; }
+	#tab-lobby .list th:nth-child(1) { width: 24%; }
+	#tab-lobby .list th:nth-child(4) { width: 17%; }
+	#tab-lobby .list th:nth-child(5) { width: 19%; }
+	#tab-lobby .list td.name { max-width: none; width: auto; }
+	#tab-lobby .list td { font-size: 14px; overflow-wrap: anywhere; hyphens: auto; }
+	#tab-lobby .list td:last-child .btn { width: 100%; padding-inline: 2px; gap: 2px; }
+	#tab-lobby .list td:nth-child(4), #tab-lobby .list td:last-child { overflow-wrap: normal; white-space: nowrap; }
+	#tab-lobby .list td:last-child .btn { font-size: 12px; }
+	.modal .list th, .modal .list td { font-size: 13px; padding: 5px 3px; }
+	.list small { font-size: 11px; }
+}
 .empty { color: var(--dim); text-align: center; padding: 12px; }
+.online { color: var(--dim); text-align: center; font-size: 13px; margin-top: 14px; }
+.active-games { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.active-games h3 { font-size: 13px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: 0.5px; margin: 0; }
+.active-games .btn { justify-content: flex-start; text-align: left; padding-block: 8px; }
+.active-games .ag-text { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 1px; }
+.active-games .ag-who, .active-games .dim { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.active-games .dim { color: var(--dim); font-size: 13px; }
 
 /* Game */
 #game {
@@ -184,7 +210,7 @@ label.check:has(input:disabled) { color: var(--dim); cursor: not-allowed; }
 .captured.hand .slot i { position: absolute; right: -2px; bottom: -2px; font: 700 11px system-ui; font-style: normal; background: var(--accent); color: #111; border-radius: 6px; padding: 0 4px; }
 .captured.hand .slot.sel img { background: rgba(155, 199, 0, 0.6); }
 .star { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: calc(var(--board) / 14); color: rgba(255, 196, 0, 0.85); text-shadow: 0 0 3px rgba(0, 0, 0, 0.4); pointer-events: none; z-index: 1; }
-.sq.hill::before { content: ''; position: absolute; inset: 0; box-shadow: inset 0 0 0 3px rgba(255, 196, 0, 0.75); }
+.sq.hill::before { content: ''; position: absolute; inset: 0; box-shadow: inset 0 0 0 3px rgba(255, 170, 0, 0.95); }
 
 .clock {
 	font: 700 20px ui-monospace, monospace;
@@ -217,11 +243,12 @@ label.check:has(input:disabled) { color: var(--dim); cursor: not-allowed; }
 .sq { position: relative; }
 .sq.light { background: var(--light); }
 .sq.dark  { background: var(--dark); }
+.sq.light.hill, .sq.dark.hill { background-image: linear-gradient(rgba(255, 170, 0, 0.5), rgba(255, 170, 0, 0.5)); } /* king of the hill centre */
 .sq.wall  { background: repeating-linear-gradient(45deg, #2b2b3d 0 6px, #22222f 6px 12px); }
 .sq.last::before, .sq.sel::before { content: ''; position: absolute; inset: 0; background: rgba(155, 199, 0, 0.41); }
 .sq.check::before { content: ''; position: absolute; inset: 0; background: radial-gradient(circle, rgba(255, 0, 0, 0.9) 0%, rgba(231, 0, 0, 0.5) 30%, transparent 75%); }
-.sq.move::after { content: ''; position: absolute; left: 36%; top: 36%; width: 28%; height: 28%; border-radius: 50%; background: rgba(20, 85, 30, 0.5); }
-.sq.move.cap::after { left: 0; top: 0; width: 100%; height: 100%; background: radial-gradient(transparent 0%, transparent 79%, rgba(20, 85, 30, 0.45) 80%); }
+.sq.move::after { content: ''; position: absolute; left: 36%; top: 36%; width: 28%; height: 28%; border-radius: 50%; background: rgba(20, 85, 30, 0.5); z-index: 1; } /* above the bonus star, below the pieces */
+.sq.move.cap::after { left: 0; top: 0; width: 100%; height: 100%; border-radius: 0; background: rgba(255, 60, 60, 0.35); box-shadow: inset 0 0 0 4px rgba(230, 30, 30, 0.9); } /* a piece that can be taken */
 .sq.hover { box-shadow: inset 0 0 0 4px rgba(255, 255, 255, 0.6); }
 
 .coord { position: absolute; font-size: max(9px, calc(var(--board) / 60)); font-weight: 700; pointer-events: none; z-index: 1; }
@@ -314,7 +341,12 @@ label.check:has(input:disabled) { color: var(--dim); cursor: not-allowed; }
 #room-code { font: 700 16px ui-monospace, monospace; color: var(--text); letter-spacing: 2px; }
 
 .status { min-height: 22px; font-weight: 700; }
+.status-row { display: flex; align-items: center; gap: 8px; }
+.status-row .status { flex: 1; min-width: 0; }
 .status.win  { color: var(--accent); }
+.status.turn { color: var(--accent); background: rgba(166, 255, 77, 0.12); border-radius: 6px; padding: 2px 8px; }
+.status-row .status.turn { flex: 0 1 auto; margin-right: auto; }
+#game.my-turn .board-wrap { box-shadow: 0 0 0 3px var(--accent), 0 0 22px rgba(166, 255, 77, 0.45); border-radius: 4px; }
 .status.loss { color: var(--danger); }
 
 .offer { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; background: var(--panel2); padding: 8px; border-radius: 8px; }
@@ -343,6 +375,7 @@ label.check:has(input:disabled) { color: var(--dim); cursor: not-allowed; }
 
 .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .actions .btn { flex: 1; }
+#btn-draw .lbl, #btn-resign:not([data-confirm]) .lbl, #btn-pgn .lbl { display: none; } /* icon only, the title says what they do */
 
 .chat { display: flex; flex-direction: column; gap: 6px; height: 140px; }
 .chat-log { flex: 1; overflow-y: auto; font-size: 13px; background: var(--panel2); border-radius: 8px; padding: 6px 8px; word-break: break-word; }
@@ -396,11 +429,16 @@ label.check:has(input:disabled) { color: var(--dim); cursor: not-allowed; }
 }
 
 @media (max-width: 900px) {
-	:root { --board: min(calc(100vw - 24px), 720px); }
+	:root { --board: min(calc(100vw - 24px), 720px, max(240px, calc((100dvh - 285px) / var(--ratio)))); } /* keep the toolbar on screen */
 	#game { flex-direction: column; align-items: center; }
 	.side { width: var(--board); height: auto; }
 	.moves { max-height: 160px; }
 }
+
+/* acid-arcade-db account pictures */
+.avatar { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; flex: none; vertical-align: middle; margin-right: 6px; }
+.player-bar .avatar, .fp .avatar, .account .avatar { margin-right: 0; }
+.modal h2 .avatar { width: 32px; height: 32px; margin-right: 10px; }
 
 /* Icons */
 .ico { width: 1.15em; height: 1.15em; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vertical-align: -0.2em; }
@@ -429,7 +467,6 @@ label.check:has(input:disabled) { color: var(--dim); cursor: not-allowed; }
 .twist-count:not(:empty) { background: var(--accent); color: #111; border-radius: 10px; padding: 0 7px; font-size: 12px; font-weight: 700; margin-left: 2px; }
 #twists-modal .twists { border: none; padding: 0; margin: 4px 0 14px; }
 #twists-modal .twists label { display: flex; align-items: center; }
-#twists-modal #twists-done { width: 100%; }
 .twists-note { text-align: left; margin-bottom: 8px; }
 .help ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.4; }
 .help li b { color: var(--accent); margin-right: 4px; }
@@ -461,9 +498,65 @@ html { background: var(--bg); }
 .site-footer a { display: inline-flex; align-items: center; gap: 8px; color: var(--dim); text-decoration: none; font-size: 13px; transition: color 0.15s; }
 .site-footer a:hover { color: var(--accent); }
 .site-footer .ico { width: 18px; height: 18px; }
+body:has(#game:not(.hidden)) .site-footer { display: none; } /* the board gets the room in a game */
 
 /* Sound and notification toggles */
 .alerts { display: inline-flex; gap: 4px; margin-left: auto; }
 .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel2); color: var(--accent); cursor: pointer; }
 .icon-btn:hover { border-color: var(--accent); }
 .icon-btn.off { color: var(--dim); }
+
+/* Desktop: the move list can be collapsed so the chat gets its room */
+@media (min-width: 901px) {
+	.side { height: calc(var(--board) * var(--ratio)); margin-top: var(--board-top, 42px); } /* level with the board squares */
+	.side.moves-off .moves { display: none; }
+	.side.moves-off .chat { flex: 1; height: auto; min-height: 0; }
+	#btn-toggle-moves.off { color: var(--dim); }
+}
+@media (max-width: 900px) { .nav .desk-only { display: none; } }
+
+/* Moves and chat: inline in the side panel on desktop, fullscreen sheets opened from the toolbar on phones */
+.sheet { display: contents; }
+.sheet-head { display: none; }
+.actions .mobile-only { display: none; }
+.badge { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: #111; font-size: 11px; font-weight: 700; line-height: 18px; }
+#btn-open-chat { position: relative; }
+#account-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.account { flex-wrap: nowrap; min-width: 0; }
+
+@media (max-width: 900px) {
+	.actions { flex-wrap: nowrap; gap: 4px; }
+	.actions .btn { flex: 1 1 0; min-width: 0; padding-inline: 4px; }
+	.actions .mobile-only { display: inline-flex; }
+	.actions .lbl, .room-info .lbl { display: none; }
+	.room-info { flex-wrap: nowrap; }
+	#room-mode { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	#btn-copy-link { flex: none; }
+	#btn-rematch .lbl, #btn-resign[data-confirm] .lbl { display: inline; }
+	#btn-rematch, #btn-resign[data-confirm] { flex: 2.6 1 0; }
+	.sheet { display: none; position: fixed; inset: 0; z-index: 40; background: var(--bg); flex-direction: column; gap: 10px; padding: calc(10px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom)); }
+	.sheet.open { display: flex; }
+	.sheet-head { display: flex; align-items: center; justify-content: space-between; font-weight: 700; font-size: 17px; }
+	.sheet-head .icon-btn { width: 40px; height: 40px; }
+	.sheet .moves { flex: 1; max-height: none; }
+	.sheet .chat { flex: 1; height: auto; min-height: 0; }
+	.sheet .chat-log { font-size: 15px; }
+}
+
+@media (max-width: 480px) {
+	.topbar { padding: 6px 0; gap: 8px; }
+	.logo { font-size: 18px; }
+	.logo-ico { width: 24px; height: 24px; margin-right: 6px; }
+	.account { gap: 6px; font-size: 13px; }
+	.account > .ico { display: none; }
+	#account-name { display: none; }
+	.player-bar { height: 24px; gap: 6px; }
+	.pname { font-size: 12px; }
+	.prating, .captured { font-size: 11px; }
+	.clock { font-size: 14px; min-width: 56px; padding: 1px 6px; }
+	.fp .clock { font-size: 13px; min-width: 46px; padding: 1px 4px; }
+	.fp .prating { display: none; }
+	.offer > span { flex-basis: 100%; }
+	.offer .btn { flex: 1; }
+	.four-players { gap: 4px 6px; }
+}

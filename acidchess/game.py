@@ -386,10 +386,17 @@ def state(room: dict, token: str) -> dict:
 	ready = room['players']['w'] and room['players']['b'] and not game['result']
 	if color == pos.turn and ready and mode(room) != 'recon':
 		legal = [engine.move_to_uci(m, pos.variant) for m in engine.legal_moves(pos)]
+	# While waiting, the player can look at where their pieces could go as if it were their turn
+	preview = []
+	if color and color != pos.turn and ready and mode(room) != 'recon':
+		ahead      = pos.copy()
+		ahead.turn = color
+		ahead.ep   = None
+		preview    = [engine.move_to_uci(m, pos.variant) for m in engine.legal_moves(ahead)]
 	players = {}
 	for c in COLORS:
 		p = room['players'][c]
-		players[c] = {'name': p['name'], 'rating': p['rating'], 'registered': bool(p['user_id']), 'bot': p.get('bot')} if p else None
+		players[c] = {'name': p['name'], 'user_id': p['user_id'], 'rating': p['rating'], 'registered': bool(p['user_id']), 'bot': p.get('bot')} if p else None
 	out = {
 		'id'           : room['id'],
 		'mode'         : mode(room),
@@ -415,6 +422,7 @@ def state(room: dict, token: str) -> dict:
 		'check'        : engine.in_check(pos) if not pos.variant.king_capture else False,
 		'moves'        : game['moves'],
 		'legal'        : legal,
+		'preview'      : preview,
 		'result'       : game['result'],
 		'reason'       : game['reason'],
 		'clock'        : {c: clock_remaining(game, c) for c in COLORS} if room['tc'] else None,
@@ -446,7 +454,7 @@ def state_four(room: dict, color: str) -> dict:
 		'toggles'     : {},
 		'color'       : color,
 		'spectator'   : color is None,
-		'players'     : {c: {'name': p['name'], 'rating': p['rating'], 'registered': bool(p['user_id']), 'bot': None} if p else None for c, p in room['players'].items()},
+		'players'     : {c: {'name': p['name'], 'user_id': p['user_id'], 'rating': p['rating'], 'registered': bool(p['user_id']), 'bot': None} if p else None for c, p in room['players'].items()},
 		'result'      : game['result'],
 		'reason'      : game['reason'],
 		'draw_offer'  : None,
