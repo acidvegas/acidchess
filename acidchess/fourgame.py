@@ -163,6 +163,7 @@ def view(room: dict, color: str) -> dict:
 		'out'           : st['out'],
 		'check'         : four.in_check(st, st['turn']) if live else False,
 		'legal'         : [four.move_to_uci(m) for m in four.legal_moves(st, color)] if live and color == st['turn'] else [],
+		'preview'       : [four.move_to_uci(m) for m in four.legal_moves(st, color)] if live and color and color != st['turn'] and color in st['alive'] else [],
 		'moves'         : game['moves'],
 		'events'        : game['events'],
 		'places'        : game['places'],
