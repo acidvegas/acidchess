@@ -2,12 +2,14 @@
 # acidchess - Developed by acidvegas in Python (https://github.com/acidvegas)
 # tests/test_app.py
 
+import json
 import os
 import queue
 import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 os.environ['ACIDCHESS_DATA_DIR'] = tempfile.mkdtemp(prefix='acidchess_test_')
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'acidchess'))
@@ -367,6 +369,24 @@ class TestApp(unittest.TestCase):
 		self.call('/resign', {'room_id': a['room_id'], 'player_token': t['g']})
 		s = self.call(f'/state?room_id={a["room_id"]}', player_token=t['r'])
 		self.assertEqual((s['result'], s['teams']), ('ry', True))
+
+
+	def test_seo(self):
+		'''Canonical, share card and JSON-LD URLs use ACIDCHESS_PUBLIC_URL when set and the request's host when not, rooms are not indexed.'''
+
+		for public, base, want in (('', 'https://chess.supernets.org', 'https://chess.supernets.org/'), ('https://chess.acid.vegas', 'https://chess.supernets.org', 'https://chess.acid.vegas/')):
+			with mock.patch.object(server, 'PUBLIC_URL', public):
+				page = self.client.get('/', base_url=base).get_data(as_text=True)
+				self.assertIn(f'<link rel="canonical" href="{want}">', page)
+				self.assertIn(f'<meta property="og:url" content="{want}">', page)
+				self.assertIn(f'<meta property="og:image" content="{want}static/og.png">', page)
+				ld = json.loads(page.split('<script type="application/ld+json">')[1].split('</script>')[0])
+				self.assertEqual((ld['url'], ld['image'], ld['@type']), (want, f'{want}static/og.png', ['VideoGame', 'WebApplication']))
+				self.assertIn(f'Sitemap: {want}sitemap.xml', self.client.get('/robots.txt', base_url=base).get_data(as_text=True))
+				self.assertIn(f'<loc>{want}</loc>', self.client.get('/sitemap.xml', base_url=base).get_data(as_text=True))
+		page = self.client.get('/abcd').get_data(as_text=True)
+		self.assertIn('<meta name="robots" content="noindex">', page)
+		self.assertNotIn('rel="canonical"', page)
 
 
 	def test_spectator(self):

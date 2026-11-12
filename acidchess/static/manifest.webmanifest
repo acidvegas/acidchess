@@ -3,6 +3,8 @@
 	"name"             : "acidchess",
 	"short_name"       : "acidchess",
 	"description"      : "Online chess with twists, bots and 4-player.",
+	"lang"             : "en",
+	"categories"       : ["games"],
 	"start_url"        : "/",
 	"scope"            : "/",
 	"display"          : "standalone",

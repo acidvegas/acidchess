@@ -130,6 +130,10 @@ mkdir -p engines && cp .build/Fairy-Stockfish/src/stockfish engines/fairy-stockf
 
 This builds the `acidchess` image *(including Fairy-Stockfish)* and starts a container bound to `127.0.0.1:20001` with the `acidchess_data` volume mounted at `/data`.
 
+| Variable               | Meaning                                                                                                                                                                                                  |
+|------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `ACIDCHESS_PUBLIC_URL` | Optional address such as `https://chess.acid.vegas` used for the canonical link, share cards, JSON-LD, robots.txt and sitemap.xml *(the request's host when unset)*. Passed on by `./setup.sh` when set. |
+
 ## acid-arcade-db
 
 acidchess can optionally share accounts with the other acid arcade games through [acid-arcade-db](../acid-arcade-db). Without it the game keeps its own accounts as described above, so nothing else is needed to run it.

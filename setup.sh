@@ -10,6 +10,10 @@ set --
 if [ -n "$ARCADE_URL" ]; then
 	set -- --network arcade -e ARCADE_URL -e ARCADE_PUBLIC_URL=${ARCADE_PUBLIC_URL:-https://arcade.\{domain\}} -e ARCADE_GAME=chess
 fi
+# The one address crawlers and share cards use, when the site answers on several
+if [ -n "$ACIDCHESS_PUBLIC_URL" ]; then
+	set -- "$@" -e ACIDCHESS_PUBLIC_URL
+fi
 docker run -d \
 	--name acidchess \
 	--restart unless-stopped \

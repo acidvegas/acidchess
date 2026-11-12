@@ -4,6 +4,8 @@
 
 import atexit
 import functools
+import json
+import os
 import queue
 import random
 import re
@@ -41,6 +43,8 @@ CHAT_RATE_WINDOW  = 1.0
 CHAT_RATE_MAX     = 2
 CHAT_TIMES        = {}
 BOT_THINKING      = set()
+PUBLIC_URL        = os.environ.get('ACIDCHESS_PUBLIC_URL', '').rstrip('/') # e.g. https://chess.acid.vegas, the one address crawlers and share cards use when the site answers on several
+DESCRIPTION       = 'Play chess online for free: quick play, 8 computer levels, Reconnaissance Blind, big boards, 4-player and 2v2, plus twists like king of the hill, three-check and drops. Open source, no install.'
 
 init_db()
 rooms = load_rooms()
@@ -290,6 +294,12 @@ def player_name() -> tuple:
 	return clean_name((request.get_json(silent=True) or {}).get('name')), None
 
 
+def public_root() -> str:
+	'''Return the site's address with a trailing slash: ACIDCHESS_PUBLIC_URL if set, otherwise the request's.'''
+
+	return f'{PUBLIC_URL}/' if PUBLIC_URL else request.url_root
+
+
 def push_stats(user_ids: list):
 	'''Send players' summaries to acid-arcade-db from a background thread, so a failed push never holds up a game.'''
 
@@ -355,7 +365,25 @@ def index(rid: str = None):
 	if rid and (len(rid) != ROOM_ID_LEN or not all(c in ROOM_ID_CHARS for c in rid.lower())):
 		return 'Not found', 404
 
-	return render_template('index.html', cache_v=CACHE_VERSION, url=request.url_root, room=bool(rid), arcade=arcade.public_url(request.host) if arcade.enabled() else '')
+	url = public_root()
+	ld  = {
+		'@context'           : 'https://schema.org',
+		'@type'              : ['VideoGame', 'WebApplication'],
+		'name'               : 'acidchess',
+		'url'                : url,
+		'description'        : DESCRIPTION,
+		'image'              : f'{url}static/og.png',
+		'applicationCategory': 'GameApplication',
+		'operatingSystem'    : 'Any',
+		'genre'              : ['Chess', 'Board game', 'Strategy'],
+		'gamePlatform'       : 'Web browser',
+		'playMode'           : ['SinglePlayer', 'MultiPlayer'],
+		'isAccessibleForFree': True,
+		'offers'             : {'@type': 'Offer', 'price': '0', 'priceCurrency': 'USD'},
+		'author'             : {'@type': 'Person', 'name': 'acidvegas', 'url': 'https://github.com/acidvegas'},
+	}
+	# < is escaped so nothing in the data can end the script tag
+	return render_template('index.html', cache_v=CACHE_VERSION, url=url, room=bool(rid), arcade=arcade.public_url(request.host) if arcade.enabled() else '', description=DESCRIPTION, ld=json.dumps(ld).replace('<', '\\u003c'))
 
 
 @app.route('/abort', methods=['POST'])
@@ -783,7 +811,7 @@ def resign():
 def robots():
 	'''Let crawlers in and point them at the sitemap.'''
 
-	return Response(f'User-agent: *\nAllow: /\nSitemap: {request.url_root}sitemap.xml\n', mimetype='text/plain')
+	return Response(f'User-agent: *\nAllow: /\nSitemap: {public_root()}sitemap.xml\n', mimetype='text/plain')
 
 
 @app.route('/sense', methods=['POST'])
@@ -805,7 +833,7 @@ def sense():
 def sitemap():
 	'''List the home page, the only page worth indexing.'''
 
-	return Response(f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>{request.url_root}</loc></url></urlset>\n', mimetype='application/xml')
+	return Response(f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>{public_root()}</loc></url></urlset>\n', mimetype='application/xml')
 
 
 @app.route('/state')
