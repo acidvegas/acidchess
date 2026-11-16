@@ -7,6 +7,7 @@ import os
 import queue
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -135,6 +136,38 @@ class TestApp(unittest.TestCase):
 		s = self.call(f'/state?room_id={rid}', player_token=a['player_token'])
 		self.assertEqual((s['color'], s['result'], s['turn'], len(s['legal'])), ('w', None, 'w', 20))
 		self.assertEqual(self.call('/lobby')['bot'], True)
+
+
+	def test_engine_search_cap(self):
+		'''No more than SEARCH_MAX computer moves are calculated at once, however many games ask.'''
+
+		busy, peak, lock = [0], [0], threading.Lock()
+
+		class FakeEngine:
+			proc = mock.Mock()
+
+			def send(self, command: str):
+				if command.startswith('go '):
+					with lock:
+						busy[0] += 1
+						peak[0]  = max(peak[0], busy[0])
+					time.sleep(0.05)
+					with lock:
+						busy[0] -= 1
+
+			def until(self, token: str) -> str:
+				return 'bestmove e2e4'
+
+			def close(self):
+				pass
+
+		with mock.patch.object(ai, 'Engine', FakeEngine), mock.patch.object(ai, 'POOL', []):
+			threads = [threading.Thread(target=ai.best_move, args=('startpos', [], 1)) for _ in range(ai.SEARCH_MAX * 3)]
+			for t in threads:
+				t.start()
+			for t in threads:
+				t.join()
+		self.assertEqual(peak[0], ai.SEARCH_MAX)
 
 
 	def test_clock_flag(self):

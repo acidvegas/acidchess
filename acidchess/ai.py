@@ -13,6 +13,8 @@ TIMEOUT     = 10 # seconds before a stuck engine is killed
 POOL_MAX    = 4  # idle engines kept running for reuse
 POOL        = []
 POOL_LOCK   = threading.Lock()
+SEARCH_MAX  = 4  # engine searches allowed at once, so a burst of computer games can not swamp the CPU
+SEARCHES    = threading.BoundedSemaphore(SEARCH_MAX)
 
 # Level -> (Skill Level, depth, movetime ms), the same table lichess uses for its 8 computer levels
 LEVELS = {
@@ -90,37 +92,38 @@ def best_move(start_fen: str, moves: list, level: int) -> str:
 	'''
 
 	skill, depth, movetime = LEVELS[level]
-	eng = None
-	try:
-		with POOL_LOCK:
-			eng = POOL.pop() if POOL else None
-		if eng is None:
-			eng = Engine()
-		# Kill the process if it hangs, which makes the reads below fail instead of blocking forever
-		watchdog = threading.Timer(TIMEOUT, eng.proc.kill)
-		watchdog.start()
+	with SEARCHES: # at most SEARCH_MAX engines think at once, the rest wait their turn
+		eng = None
 		try:
-			eng.send('ucinewgame')
-			eng.send(f'setoption name Skill Level value {skill}')
-			eng.send('isready')
-			eng.until('readyok')
-			eng.send(f'position fen {start_fen}' + (' moves ' + ' '.join(moves) if moves else ''))
-			eng.send(f'go depth {depth} movetime {movetime}')
-			move = eng.until('bestmove').split()[1]
-		finally:
-			watchdog.cancel()
-	except (OSError, EOFError, IndexError, ValueError) as e:
-		print(f'engine error: {e}')
+			with POOL_LOCK:
+				eng = POOL.pop() if POOL else None
+			if eng is None:
+				eng = Engine()
+			# Kill the process if it hangs, which makes the reads below fail instead of blocking forever
+			watchdog = threading.Timer(TIMEOUT, eng.proc.kill)
+			watchdog.start()
+			try:
+				eng.send('ucinewgame')
+				eng.send(f'setoption name Skill Level value {skill}')
+				eng.send('isready')
+				eng.until('readyok')
+				eng.send(f'position fen {start_fen}' + (' moves ' + ' '.join(moves) if moves else ''))
+				eng.send(f'go depth {depth} movetime {movetime}')
+				move = eng.until('bestmove').split()[1]
+			finally:
+				watchdog.cancel()
+		except (OSError, EOFError, IndexError, ValueError) as e:
+			print(f'engine error: {e}')
+			if eng:
+				eng.close()
+			return None
+		with POOL_LOCK:
+			if len(POOL) < POOL_MAX:
+				POOL.append(eng)
+				eng = None
 		if eng:
 			eng.close()
-		return None
-	with POOL_LOCK:
-		if len(POOL) < POOL_MAX:
-			POOL.append(eng)
-			eng = None
-	if eng:
-		eng.close()
-	return None if move in ('(none)', '0000') else move
+		return None if move in ('(none)', '0000') else move
 
 
 def close_pool():
