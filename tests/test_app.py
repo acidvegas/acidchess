@@ -170,6 +170,17 @@ class TestApp(unittest.TestCase):
 		self.assertEqual(peak[0], ai.SEARCH_MAX)
 
 
+	def test_room_scanning(self):
+		'''An IP that looks up too many rooms that don't exist gets "not found" for every room for a while, other IPs are not affected.'''
+
+		room = self.client.post('/create', json={'tc': '5+0'}).get_json()
+		scan = {'REMOTE_ADDR': '10.4.0.1'}
+		for n in range(server.MAX_IP_MISSES):
+			self.assertEqual(self.client.get(f'/state?room_id=zz{n:02d}', environ_base=scan).status_code, 404)
+		self.assertEqual(self.client.get(f'/state?room_id={room["room_id"]}', environ_base=scan).status_code, 404)
+		self.assertEqual(self.client.get(f'/state?room_id={room["room_id"]}', environ_base={'REMOTE_ADDR': '10.4.0.2'}).status_code, 200)
+
+
 	def test_clock_flag(self):
 		'''Clocks start after both first moves and running out loses.'''
 

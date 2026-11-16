@@ -37,6 +37,8 @@ SUBSCRIBERS_LOCK  = threading.Lock()
 STREAMS           = {} # ip -> open /events streams, guarded by SUBSCRIBERS_LOCK
 MAX_IP_ROOMS      = 5  # unfinished rooms one IP may have created
 MAX_IP_STREAMS    = 20 # concurrent /events streams per IP
+MISSES            = {} # ip -> times of recent lookups of room ids that don't exist
+MAX_IP_MISSES     = 30 # unknown room ids one IP may look up a minute, so private rooms can't be found by scanning
 MAX_ROOMS         = 500
 ROOM_TIMEOUT      = 24 * 60 * 60
 ROOM_ID_CHARS     = 'abcdefghjkmnpqrstuvwxyz23456789'
@@ -191,6 +193,21 @@ def clean_name(name: str) -> str:
 	return name or f'Guest{random.randint(1000, 9999)}'
 
 
+def find_room(rid: str) -> dict:
+	'''Return the room with this id, or None. An IP that keeps asking for rooms that don't exist gets None for every room for a minute.'''
+
+	now    = time.time()
+	misses = [t for t in MISSES.get(request.remote_addr, []) if t > now - 60]
+	if len(misses) >= MAX_IP_MISSES:
+		return None
+	room = rooms.get(rid)
+	if room is None:
+		for ip in [ip for ip, times in MISSES.items() if times[-1] <= now - 60]:
+			del MISSES[ip]
+		MISSES[request.remote_addr] = misses + [now]
+	return room
+
+
 def get_room() -> tuple:
 	'''Return (room, color) for the request's room id and player token. Color is None for spectators.'''
 
@@ -201,7 +218,7 @@ def get_room() -> tuple:
 		data  = request.get_json(silent=True) or {}
 		rid   = (data.get('room_id') or '').lower()
 		token = data.get('player_token') or ''
-	room = rooms.get(rid)
+	room = find_room(rid)
 	if room is None:
 		return None, None
 	color = next((c for c in chess_game.seats(room) if token and room['players'][c] and room['players'][c]['token'] == token), None)
@@ -630,7 +647,7 @@ def events():
 
 	rid = (request.args.get('room_id') or '').lower()
 	with ROOMS_LOCK:
-		if rid not in rooms:
+		if not find_room(rid):
 			return Response('event: error\ndata: invalid_room\n\n', mimetype='text/event-stream', status=404)
 	ip    = request.remote_addr
 	q     = queue.Queue(maxsize=64)
@@ -691,7 +708,7 @@ def join():
 	'''Take the empty seat in a room, or watch it if full.'''
 
 	data = request.get_json(silent=True) or {}
-	room = rooms.get((data.get('room_id') or '').lower())
+	room = find_room((data.get('room_id') or '').lower())
 	if not room:
 		return api_error('room not found', 404)
 	if data.get('watch') or room['game']['result'] or all(room['players'].values()):
@@ -738,9 +755,11 @@ def move():
 	room, color = get_room()
 	if not room or not color:
 		return api_error('not a player in this room', 403)
-	error = chess_game.make_move(room, color, (request.get_json(silent=True) or {}).get('uci'))
+	result = room['game']['result']
+	error  = chess_game.make_move(room, color, (request.get_json(silent=True) or {}).get('uci'))
 	if error:
-		changed(room)
+		if room['game']['result'] != result: # only a clock that ran out changes anything on a refused move
+			changed(room)
 		return api_error(error)
 	changed(room)
 	maybe_bot(room)
