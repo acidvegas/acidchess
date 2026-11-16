@@ -28,6 +28,7 @@ from storage import DB_LOCK, db_connect, delete_room, delete_user, get_user, ini
 
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 64 * 1024 # no request needs more than a few KB
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1) # https links in the page metadata behind nginx
 
 CACHE_VERSION     = int(time.time())
