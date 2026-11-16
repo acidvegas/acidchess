@@ -3,7 +3,6 @@
 # acidchess/four.py
 
 import re
-import time
 
 
 # 4-player chess on a 14x14 board with the 3x3 corners cut off. Turns go clockwise: red (bottom), blue (left), yellow (top), green (right).
@@ -231,7 +230,6 @@ def placements(state: dict) -> dict:
 def play(state: dict, move: tuple) -> list:
 	'''Play a legal move for the side to move and advance the turn. Returns [(color, reason)] for every player knocked out by it.'''
 
-	color = state['turn']
 	board = state['board']
 	taken = board[move[1]]
 	update_rights(state['rights'], board, move)

@@ -3,6 +3,11 @@
 # setup.sh
 
 set -e
+# The arcade network comes from acid-arcade-db's setup.sh, without it docker run below fails after the old container is gone
+if [ -n "$ARCADE_URL" ] && ! docker network inspect arcade >/dev/null 2>&1; then
+	echo 'ARCADE_URL is set but the arcade docker network does not exist, run acid-arcade-db setup.sh first' >&2
+	exit 1
+fi
 docker build -t acidchess .
 docker run --rm --user root -v acidchess_data:/data acidchess chown -R app:app /data # data made by older root containers
 docker rm -f acidchess 2>/dev/null || true

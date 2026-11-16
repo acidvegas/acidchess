@@ -57,6 +57,10 @@ rooms = load_rooms()
 # Spectator streams don't survive a restart
 for _room in rooms.values():
 	_room['spectators'] = {}
+	# No one has a stream open right after a restart either, so every player gets the full wait to reconnect before anyone can claim against them
+	for _p in _room['players'].values():
+		if _p:
+			_p['seen'] = time.time()
 
 
 def announce(room: dict):
@@ -260,6 +264,16 @@ def make_room_id() -> str:
 		rid = ''.join(random.choices(ROOM_ID_CHARS, k=ROOM_ID_LEN))
 		if rid not in rooms:
 			return rid
+
+
+def mark_seen(rid: str, token: str):
+	'''Note that the player holding this token has the room's event stream open, for claims against players who left.'''
+
+	with ROOMS_LOCK:
+		room = rooms.get(rid)
+		for p in room['players'].values() if room and token else []:
+			if p and p['token'] == token:
+				p['seen'] = time.time()
 
 
 def maybe_bot(room: dict):
@@ -583,6 +597,28 @@ def chat():
 	return jsonify({'ok': True})
 
 
+@app.route('/claim', methods=['POST'])
+@rooms_locked
+def claim():
+	'''Claim against a player who has had no event stream open for five minutes: the win in 2-player, knocking them out in 4-player.'''
+
+	room, color = get_room()
+	if not room or not color:
+		return api_error('not a player in this room', 403)
+	due = [c for c, wait in chess_game.claim_in(room).items() if wait == 0 and c != color]
+	if chess_game.is_four(room):
+		target = (request.get_json(silent=True) or {}).get('color')
+		if color not in room['game']['state']['alive'] or target not in due:
+			return api_error('nothing to claim')
+		fourgame.resign(room, target, 'left the game')
+	else:
+		if chess_game.opponent(color) not in due:
+			return api_error('nothing to claim')
+		chess_game.finish(room, '1-0' if color == 'w' else '0-1', 'opponent left')
+	changed(room)
+	return jsonify({'ok': True})
+
+
 @app.route('/create', methods=['POST'])
 @rooms_locked
 def create():
@@ -603,7 +639,7 @@ def create():
 	if bot is not None:
 		if game_mode != 'classic':
 			return api_error('the computer only plays classic for now')
-		if bot not in ai.LEVELS:
+		if type(bot) is not int or bot not in ai.LEVELS: # True and 8.0 equal levels but are not one
 			return api_error('level must be 1-8')
 		if not ai.available():
 			return api_error('the computer is not available')
@@ -661,6 +697,7 @@ def events():
 	ip    = request.remote_addr
 	q     = queue.Queue(maxsize=64)
 	watch = secrets.token_hex(8) if request.args.get('watch') else None
+	token = request.args.get('player_token') or ''
 	with SUBSCRIBERS_LOCK:
 		if STREAMS.get(ip, 0) >= MAX_IP_STREAMS:
 			return Response('event: error\ndata: too_many_streams\n\n', mimetype='text/event-stream', status=429)
@@ -671,6 +708,7 @@ def events():
 			if rid in rooms:
 				rooms[rid]['spectators'][watch] = True
 		notify(rid)
+	mark_seen(rid, token)
 
 	def stream():
 		try:
@@ -680,7 +718,9 @@ def events():
 					yield f'event: state\ndata: {q.get(timeout=10)}\n\n'
 				except queue.Empty:
 					yield ': ping\n\n'
+				mark_seen(rid, token) # at least every 10 seconds while the stream is open
 		finally:
+			mark_seen(rid, token)
 			with SUBSCRIBERS_LOCK:
 				subs = SUBSCRIBERS.get(rid, [])
 				if q in subs:

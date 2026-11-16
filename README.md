@@ -138,7 +138,7 @@ This builds the `acidchess` image *(including Fairy-Stockfish)* and starts a con
 
 ## acid-arcade-db
 
-acidchess can optionally share accounts with the other acid arcade games through [acid-arcade-db](../acid-arcade-db). Without it the game keeps its own accounts as described above, so nothing else is needed to run it.
+acidchess can optionally share accounts with the other acid arcade games through [acid-arcade-db](https://github.com/acidvegas/acid-arcade-db). Without it the game keeps its own accounts as described above, so nothing else is needed to run it.
 
 Set these environment variables to turn it on:
 

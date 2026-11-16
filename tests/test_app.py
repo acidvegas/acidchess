@@ -112,6 +112,81 @@ class TestApp(unittest.TestCase):
 		self.assertEqual((s['result'], s['reason']), ('1/2-1/2', 'agreement'))
 
 
+	def test_bot_level(self):
+		'''Only a whole number 1-8 is a computer level, so true and 8.0 are refused even though they equal levels.'''
+
+		with mock.patch.object(ai, 'available', return_value=True):
+			for bot in (True, 8.0, '3', 0, 9):
+				self.assertEqual(self.call('/create', {'bot': bot})['error'], 'level must be 1-8', bot)
+
+
+	def test_claim(self):
+		'''In an untimed game a player whose event stream has been gone five minutes loses to a claim, rated like any other win. Timed games never have claims.'''
+
+		ta, tb = self.signup('stayer'), self.signup('leaver')
+		rid, t = self.start({'mode': 'big8', 'color': 'w', 'rated': True}, ta, tb) # not classic, whose leaderboard test_rated_game checks
+		self.play(rid, t, ['e2e4'])
+		self.assertEqual(self.call(f'/state?room_id={rid}', player_token=t['w'])['claim_in'], {}) # still time to abort instead
+		self.assertNotIn('error', self.call('/move', {'room_id': rid, 'player_token': t['b'], 'uci': 'e7e5'}))
+		s = self.call(f'/state?room_id={rid}', player_token=t['w'])
+		self.assertEqual(s['claim_in'], {'w': 300, 'b': 300})
+		self.assertEqual(self.call('/claim', {'room_id': rid, 'player_token': t['w']})['error'], 'nothing to claim')
+		server.rooms[rid]['players']['b']['seen'] -= 301
+		self.assertEqual(self.call(f'/state?room_id={rid}', player_token=t['w'])['claim_in'], {'w': 300, 'b': 0})
+		self.assertEqual(self.call('/claim', {'room_id': rid, 'player_token': t['b']})['error'], 'nothing to claim')
+		# Opening the event stream counts as being back
+		stream = self.client.get(f'/events?room_id={rid}&player_token={t["b"]}', buffered=False)
+		self.assertEqual(self.call(f'/state?room_id={rid}', player_token=t['w'])['claim_in']['b'], 300)
+		stream.close()
+		server.rooms[rid]['players']['b']['seen'] -= 301
+		self.assertIn('ok', self.call('/claim', {'room_id': rid, 'player_token': t['w']}))
+		s = self.call(f'/state?room_id={rid}', player_token=t['w'])
+		self.assertEqual((s['result'], s['reason'], s['rating_diff'], s['claim_in']), ('1-0', 'opponent left', {'w': 20, 'b': -20}, {}))
+		self.assertEqual(self.call('/auth/me', auth_token=tb)['user']['ratings']['big8']['losses'], 1)
+		rid, t = self.start({'name': 'a', 'tc': '10+0'})
+		self.play(rid, t, ['e2e4', 'e7e5'])
+		server.rooms[rid]['players']['b']['seen'] -= 3600
+		self.assertEqual(self.call(f'/state?room_id={rid}', player_token=t['w'])['claim_in'], {})
+		self.assertEqual(self.call('/claim', {'room_id': rid, 'player_token': t['w']})['error'], 'nothing to claim')
+
+
+	def test_claim_bot(self):
+		'''The computer is never absent, so there is nothing to claim against it.'''
+
+		with mock.patch.object(ai, 'available', return_value=True), mock.patch.object(ai, 'best_move', return_value='e7e5'):
+			a   = self.call('/create', {'bot': 2, 'color': 'w'})
+			rid = a['room_id']
+			self.assertNotIn('error', self.call('/move', {'room_id': rid, 'player_token': a['player_token'], 'uci': 'e2e4'}))
+			self.wait(rid, a['player_token'], lambda s: len(s['moves']) == 2)
+		for p in server.rooms[rid]['players'].values():
+			p['seen'] -= 3600
+		self.assertEqual(self.call(f'/state?room_id={rid}', player_token=a['player_token'])['claim_in'], {'w': 0})
+		self.assertEqual(self.call('/claim', {'room_id': rid, 'player_token': a['player_token']})['error'], 'nothing to claim')
+
+
+	def test_claim_four(self):
+		'''4-player: a player gone five minutes can be knocked out by any live player and the game goes on without them.'''
+
+		a   = self.call('/create', {'mode': 'four', 'color': 'r', 'name': 'r'})
+		rid = a['room_id']
+		t   = {'r': a['player_token']}
+		for _ in range(3):
+			j = self.call('/join', {'room_id': rid, 'name': 'x'})
+			t[j['color']] = j['player_token']
+		for color, uci in (('r', 'h2h4'), ('b', 'b7d7'), ('y', 'g13g11'), ('g', 'm8k8')):
+			self.assertNotIn('error', self.call('/move', {'room_id': rid, 'player_token': t[color], 'uci': uci}), uci)
+		self.assertEqual(self.call('/claim', {'room_id': rid, 'player_token': t['r'], 'color': 'b'})['error'], 'nothing to claim')
+		server.rooms[rid]['players']['b']['seen'] -= 301
+		self.assertEqual(self.call(f'/state?room_id={rid}', player_token=t['y'])['claim_in'], {'r': 300, 'b': 0, 'y': 300, 'g': 300})
+		self.assertEqual(self.call('/claim', {'room_id': rid, 'player_token': t['b'], 'color': 'b'})['error'], 'nothing to claim')
+		self.assertIn('ok', self.call('/claim', {'room_id': rid, 'player_token': t['y'], 'color': 'b'}))
+		s = self.call(f'/state?room_id={rid}', player_token=t['r'])
+		self.assertEqual((s['result'], s['alive'], s['out'], s['turn'], s['claim_in']), (None, ['r', 'y', 'g'], [['b', 'left the game']], 'r', {'r': 300, 'y': 300, 'g': 300}))
+		self.assertEqual(s['events'][-1]['text'], 'Blue is out (left the game)')
+		self.assertNotIn('error', self.call('/move', {'room_id': rid, 'player_token': t['r'], 'uci': 'h4h5'}))
+		self.assertEqual(self.call(f'/state?room_id={rid}', player_token=t['r'])['turn'], 'y')
+
+
 	def test_computer(self):
 		'''The computer replies to moves, refuses draws, records results per level and plays again on request.'''
 
@@ -168,6 +243,29 @@ class TestApp(unittest.TestCase):
 			for t in threads:
 				t.join()
 		self.assertEqual(peak[0], ai.SEARCH_MAX)
+
+
+	def test_profile_recent(self):
+		'''Recent games on a profile mix 2-player and 4-player games, newest first.'''
+
+		token   = self.signup('mixer')
+		user_id = self.call('/auth/me', auth_token=token)['user']['id']
+		rid, t  = self.start({'color': 'w'}, token)
+		self.call('/resign', {'room_id': rid, 'player_token': t['b']})
+		a = self.call('/create', {'mode': 'four', 'color': 'r'}, token)
+		f = {'r': a['player_token']}
+		for _ in range(3):
+			j = self.call('/join', {'room_id': a['room_id'], 'name': 'x'})
+			f[j['color']] = j['player_token']
+		for color in ('b', 'y', 'g'):
+			self.call('/resign', {'room_id': a['room_id'], 'player_token': f[color]})
+		with storage.DB_LOCK, storage.db_connect() as c:
+			c.execute('UPDATE games SET ended_at=100 WHERE room_id=?', (rid,))
+			c.execute('UPDATE games4 SET ended_at=200 WHERE room_id=?', (a['room_id'],))
+		recent = self.call(f'/user/{user_id}')['user']['recent']
+		self.assertEqual([g['room_id'] for g in recent], [a['room_id'], rid])
+		self.assertEqual((recent[0]['players']['r'], recent[0]['places']['r'], recent[0]['mode']), (['mixer', user_id], 1, 'four'))
+		self.assertEqual((recent[1]['white'], recent[1]['result']), ('mixer', '1-0'))
 
 
 	def test_room_scanning(self):

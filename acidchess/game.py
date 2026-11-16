@@ -21,6 +21,7 @@ NAMES         = {'P': 'pawn', 'N': 'knight', 'B': 'bishop', 'R': 'rook', 'Q': 'q
 WATCH_DELAY   = 4 # plies spectators trail behind in Reconnaissance Blind, so a player can't watch their own game for hints
 VARIANTS      = {} # (mode, start FEN, rule toggles) -> Variant, for games whose toggles changed the rules or start position
 VARIANTS_MAX  = 500
+ABSENT_AFTER  = 5 * 60 # seconds a player can have no event stream open before the others can claim against them
 
 MODES = {
 	'classic' : {'name': 'Classic',              'variant': engine.CLASSIC},
@@ -50,6 +51,19 @@ def check_flag(room: dict) -> bool:
 	else:
 		finish(room, '1/2-1/2', 'timeout vs insufficient material')
 	return True
+
+
+def claim_in(room: dict) -> dict:
+	'''Return color -> seconds until the others can claim against that player for having no event stream open, 0 once they can.
+
+	Only untimed 2-player games and 4-player games past the point of aborting have claims, and computer players are never absent.
+	'''
+
+	game = room['game']
+	if game['result'] or len(game['moves']) < len(room['players']) or (room['tc'] and not is_four(room)):
+		return {}
+	now = time.time()
+	return {c: max(0, round(room['players'][c]['seen'] + ABSENT_AFTER - now)) for c in (game['state']['alive'] if is_four(room) else COLORS) if not room['players'][c].get('bot')}
 
 
 def clock_remaining(game: dict, color: str) -> int:
@@ -369,7 +383,7 @@ def recon_view(room: dict, color: str) -> dict:
 def seat(room: dict, color: str, token: str, name: str, user_id: int, bot: int = None):
 	'''Seat a player in a room. Computer players have a level and no token.'''
 
-	room['players'][color] = {'token': token, 'name': name, 'user_id': user_id, 'rating': rating_of(user_id, mode(room)) if user_id else None, 'bot': bot}
+	room['players'][color] = {'token': token, 'name': name, 'user_id': user_id, 'rating': rating_of(user_id, mode(room)) if user_id else None, 'bot': bot, 'seen': time.time()}
 
 
 def seats(room: dict) -> tuple:
@@ -434,6 +448,7 @@ def state(room: dict, token: str) -> dict:
 		'draw_offer'   : game['draw_offer'],
 		'rating_diff'  : game['rating_diff'],
 		'rematch'      : room['rematch'],
+		'claim_in'     : claim_in(room),
 		'chat'         : room['chat'][-CHAT_MAX:],
 		'spectators'   : len(room['spectators']),
 		'pgn'          : pgn(room) if game['result'] or mode(room) != 'recon' else None,
@@ -464,6 +479,7 @@ def state_four(room: dict, color: str) -> dict:
 		'draw_offer'  : None,
 		'rating_diff' : game['rating_diff'],
 		'rematch'     : room['rematch'],
+		'claim_in'    : claim_in(room),
 		'chat'        : room['chat'][-CHAT_MAX:],
 		'spectators'  : len(room['spectators']),
 		'pgn'         : None,

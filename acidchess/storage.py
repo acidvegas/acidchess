@@ -71,7 +71,15 @@ def get_user(user_id: int) -> dict:
 		user['ratings'] = {r['mode']: rounded(r) for r in c.execute('SELECT * FROM ratings WHERE user_id=?', (user_id,)).fetchall()}
 		user['bot']     = [dict(r) for r in c.execute('SELECT level, wins, losses, draws FROM bot_stats WHERE user_id=? ORDER BY level', (user_id,)).fetchall()]
 		# Names come from the users table so a renamed account shows its current name, guests keep the name they typed
-		user['recent']  = [dict(r) for r in c.execute('SELECT g.room_id, g.mode, COALESCE(w.username, g.white) AS white, COALESCE(b.username, g.black) AS black, g.white_id, g.black_id, g.result, g.reason, g.rated, g.tc, g.ended_at FROM games g LEFT JOIN users w ON w.id = g.white_id LEFT JOIN users b ON b.id = g.black_id WHERE g.white_id=? OR g.black_id=? ORDER BY g.ended_at DESC LIMIT 10', (user_id, user_id)).fetchall()]
+		recent = [dict(r) for r in c.execute('SELECT g.room_id, g.mode, COALESCE(w.username, g.white) AS white, COALESCE(b.username, g.black) AS black, g.white_id, g.black_id, g.result, g.reason, g.rated, g.tc, g.ended_at FROM games g LEFT JOIN users w ON w.id = g.white_id LEFT JOIN users b ON b.id = g.black_id WHERE g.white_id=? OR g.black_id=? ORDER BY g.ended_at DESC LIMIT 10', (user_id, user_id)).fetchall()]
+		# 4-player games keep color -> [name, user id] as JSON, found the same way delete_user finds them
+		for r in c.execute('SELECT room_id, mode, players, places, result, reason, rated, tc, ended_at FROM games4 WHERE players LIKE ? ORDER BY ended_at DESC LIMIT 10', (f'%, {user_id}]%',)).fetchall():
+			game = dict(r, players=json.loads(r['players']), places=json.loads(r['places']))
+			for seat in game['players'].values():
+				name = c.execute('SELECT username FROM users WHERE id=?', (seat[1],)).fetchone() if seat[1] else None
+				seat[0] = name['username'] if name else seat[0]
+			recent.append(game)
+		user['recent'] = sorted(recent, key=lambda g: g['ended_at'], reverse=True)[:10]
 	return user
 
 

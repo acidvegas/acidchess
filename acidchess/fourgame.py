@@ -126,8 +126,11 @@ def remaining(game: dict, color: str) -> int:
 	return max(0, ms)
 
 
-def resign(room: dict, color: str) -> str:
-	'''Resign: the player is out, their army freezes. Returns an error message, or None.'''
+def resign(room: dict, color: str, reason: str = 'resignation') -> str:
+	'''Resign: the player is out, their army freezes. Returns an error message, or None.
+
+	:param reason: why they are out, a claim against a player who left uses this too
+	'''
 
 	game  = room['game']
 	state = game['state']
@@ -137,8 +140,8 @@ def resign(room: dict, color: str) -> str:
 	if was_turn and game['clock_at'] is not None:
 		game['clock'][color] = remaining(game, color)
 		game['clock_at'] = time.time()
-	four.eliminate(state, color, 'resignation')
-	knocked = [(color, 'resignation')] + (four.advance(state) if was_turn else [])
+	four.eliminate(state, color, reason)
+	knocked = [(color, reason)] + (four.advance(state) if was_turn else [])
 	note_out(game, knocked)
 	if four.finished(state):
 		finish(room)

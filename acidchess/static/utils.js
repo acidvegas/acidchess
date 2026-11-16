@@ -54,6 +54,7 @@ let swapNames  = {};
 let senseHover = null;  // square under the pointer while choosing where to sense
 let audio      = null;  // AudioContext, created on the first tap since browsers block sound before that
 let unread     = 0;     // things that happened while the tab was in the background, shown in the title
+let claimTimer = null;  // refetches the state when a player who left could next be claimed against
 
 
 // ---------- helpers ----------
@@ -255,9 +256,17 @@ async function showProfile(userId) {
 	const u = data.user;
 	if (!u) return toast(data.error || 'not found');
 	const recent = u.recent.map((g) => {
-		const white = g.white_id === u.id;
-		const res = g.result === '1/2-1/2' ? 'Draw' : (g.result === '1-0') === white ? 'Win' : 'Loss';
-		return `<tr><td>${res}</td><td>vs ${avatar(white ? g.black_id : g.white_id)}${esc(white ? g.black : g.white)}</td><td>${esc(modeNames[g.mode] || g.mode)}</td><td>${esc(g.tc || '∞')}</td><td>${g.rated ? 'Rated' : 'Casual'}</td></tr>`;
+		let res, vs;
+		if (g.players) { // 4-player: color -> [name, user id], 1st place wins
+			const seat = Object.keys(g.players).find((c) => g.players[c][1] === u.id);
+			res = g.places[seat] === 1 ? 'Win' : 'Loss';
+			vs = Object.keys(g.players).filter((c) => c !== seat).map((c) => `${avatar(g.players[c][1])}${esc(g.players[c][0])}`).join(', ');
+		} else {
+			const white = g.white_id === u.id;
+			res = g.result === '1/2-1/2' ? 'Draw' : (g.result === '1-0') === white ? 'Win' : 'Loss';
+			vs = `${avatar(white ? g.black_id : g.white_id)}${esc(white ? g.black : g.white)}`;
+		}
+		return `<tr><td>${res}</td><td>vs ${vs}</td><td>${esc(modeNames[g.mode] || g.mode)}</td><td>${esc(g.tc || '∞')}</td><td>${g.rated ? 'Rated' : 'Casual'}</td></tr>`;
 	}).join('');
 	const ratings = Object.entries(u.ratings).map(([m, r]) => `<tr><td>${esc(modeNames[m] || m)}</td><td>${r.rating}</td><td>${r.peak_rating}</td><td>${r.wins}/${r.losses}/${r.draws}</td><td>${r.best_streak}</td></tr>`).join('');
 	openModal(`
@@ -446,7 +455,7 @@ function enterRoom(roomId, token) {
 	chatSeen = null;
 	closeSheets();
 	if (events) events.close();
-	events = new EventSource(`/events?room_id=${roomId}${ptoken ? '' : '&watch=1'}`);
+	events = new EventSource(`/events?room_id=${roomId}${ptoken ? `&player_token=${encodeURIComponent(ptoken)}` : '&watch=1'}`);
 	events.addEventListener('state', fetchState);
 	events.addEventListener('error', () => { if (events && events.readyState === EventSource.CLOSED) setTimeout(fetchState, 2000); });
 	fetchState();
@@ -877,6 +886,7 @@ function renderStatus() {
 	$('btn-draw').disabled = st.draw_offer === mine;
 	$('btn-draw').querySelector('.lbl').textContent = st.draw_offer === mine ? 'Draw offered' : 'Offer draw';
 	$('btn-resign').classList.toggle('hidden', !playing || !opponent || canAbort);
+	renderClaim(playing && opponent ? [mine === 'w' ? 'b' : 'w'] : []);
 	const canRematch = mine && st.result && opponent;
 	$('btn-rematch').classList.toggle('hidden', !canRematch);
 	if (canRematch) {
@@ -916,6 +926,8 @@ function renderStatusFour() {
 	$('btn-abort').querySelector('.lbl').textContent = seated ? 'Abort' : 'Cancel';
 	$('btn-draw').classList.add('hidden');
 	$('btn-resign').classList.toggle('hidden', !playing || !seated || canAbort);
+	// Never offer to knock out a 2v2 partner, that loses the game for the team
+	renderClaim(playing ? st.alive.filter((c) => c !== mine && !(st.teams && FOUR.indexOf(c) % 2 === FOUR.indexOf(mine) % 2)) : []);
 	const canRematch = mine && st.result && seated;
 	$('btn-rematch').classList.toggle('hidden', !canRematch);
 	if (canRematch) {
@@ -925,6 +937,20 @@ function renderStatusFour() {
 	$('chat-input').classList.toggle('hidden', !mine);
 	$('btn-open-chat').classList.remove('hidden');
 	$('btn-pgn').classList.add('hidden');
+}
+
+// A player with no event stream open for five minutes can be claimed against, so look again when the next one comes due
+function renderClaim(rivals) {
+	const due = rivals.filter((c) => c in st.claim_in);
+	const ready = due.find((c) => st.claim_in[c] === 0);
+	$('btn-claim').classList.toggle('hidden', !ready);
+	if (ready) {
+		$('btn-claim').dataset.color = ready;
+		$('btn-claim').querySelector('.lbl').textContent = st.board4 ? `Remove ${FOUR_NAMES[ready]}` : 'Claim win';
+	}
+	clearTimeout(claimTimer);
+	const wait = Math.min(...due.map((c) => st.claim_in[c]).filter((s) => s > 0));
+	if (wait !== Infinity) claimTimer = setTimeout(fetchState, (wait + 1) * 1000);
 }
 
 function renderRecon() {
@@ -1278,6 +1304,7 @@ function init() {
 	$('btn-draw-accept').onclick = () => action('/draw', { action: 'accept' });
 	$('btn-draw-decline').onclick = () => action('/draw', { action: 'decline' });
 	$('btn-rematch').onclick = () => action('/rematch');
+	$('btn-claim').onclick = () => action('/claim', { color: $('btn-claim').dataset.color });
 	$('btn-resign').onclick = () => {
 		if ($('btn-resign').dataset.confirm) { delete $('btn-resign').dataset.confirm; $('btn-resign').querySelector('.lbl').textContent = 'Resign'; return action('/resign'); }
 		$('btn-resign').dataset.confirm = '1';
