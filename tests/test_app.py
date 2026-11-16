@@ -30,6 +30,7 @@ class TestApp(unittest.TestCase):
 		'''Create a test client.'''
 
 		self.client = server.app.test_client()
+		self.client.environ_base['REMOTE_ADDR'] = self.id() # rooms left open by earlier tests don't count against this one's room limit
 
 
 	def call(self, path: str, body: dict = None, auth_token: str = '', player_token: str = '') -> dict:
@@ -267,6 +268,45 @@ class TestApp(unittest.TestCase):
 		self.assertNotIn('classic', self.call('/auth/me', auth_token=ta)['user']['ratings'])
 
 
+	def test_room_limits(self):
+		'''One address can have five unfinished rooms, finishing one frees a slot, other addresses are unaffected, and a full server refuses everyone.'''
+
+		made = [self.call('/create', {'name': 'a'}) for _ in range(4)] + [self.call('/quickplay', {'name': 'a', 'mode': 'big8'})]
+		self.assertTrue(all('room_id' in m for m in made))
+		resp = self.client.post('/create', json={'name': 'a'})
+		self.assertEqual((resp.status_code, resp.get_json()['error']), (429, 'you already have 5 open rooms, finish or leave one first'))
+		self.assertEqual(self.client.post('/quickplay', json={'name': 'a', 'mode': 'big8'}).status_code, 429)
+		with mock.patch.object(ai, 'available', return_value=True):
+			self.assertEqual(self.client.post('/create', json={'bot': 1}).status_code, 429)
+		other = server.app.test_client()
+		other.environ_base['REMOTE_ADDR'] = self.id() + '-other'
+		self.assertIn('room_id', other.post('/create', json={'name': 'b'}).get_json())
+		self.assertNotIn('error', self.call('/abort', {'room_id': made[0]['room_id'], 'player_token': made[0]['player_token']}))
+		self.assertIn('room_id', self.call('/create', {'name': 'a'}))
+		with mock.patch.object(server, 'MAX_ROOMS', len(server.rooms)):
+			resp = other.post('/create', json={'name': 'b'})
+		self.assertEqual((resp.status_code, resp.get_json()['error']), (503, 'server full, try again later'))
+
+
+	def test_stream_limit(self):
+		'''One address can hold twenty event streams, and closing one frees its slot.'''
+
+		rid     = self.call('/create', {'name': 'a'})['room_id']
+		streams = [self.client.get(f'/events?room_id={rid}', buffered=False) for _ in range(server.MAX_IP_STREAMS)]
+		self.assertEqual([r.status_code for r in streams], [200] * server.MAX_IP_STREAMS)
+		self.assertEqual(self.client.get(f'/events?room_id={rid}', buffered=False).status_code, 429)
+		other = server.app.test_client()
+		other.environ_base['REMOTE_ADDR'] = self.id() + '-other'
+		streams.append(other.get(f'/events?room_id={rid}', buffered=False))
+		self.assertEqual(streams[-1].status_code, 200)
+		streams.pop(0).close()
+		streams.append(self.client.get(f'/events?room_id={rid}', buffered=False))
+		self.assertEqual(streams[-1].status_code, 200)
+		for r in streams:
+			r.close()
+		self.assertNotIn(self.id(), server.STREAMS)
+
+
 	def test_toggles(self):
 		'''Twisted games get a new random layout every game, are always casual, and are dropped where they aren't supported yet.'''
 
@@ -360,7 +400,8 @@ class TestApp(unittest.TestCase):
 		q = [q[0]] + [self.call('/quickplay', {'name': f'q{i}', 'mode': 'four', 'tc': '3+2'}) for i in range(3)]
 		self.assertEqual(len({x['room_id'] for x in q}), 1)
 		self.assertEqual(sorted(x['color'] for x in q), ['b', 'g', 'r', 'y'])
-		# 2v2 ends at the first player out
+		# 2v2 ends at the first player out, from another address since this one already has five open rooms
+		self.client.environ_base['REMOTE_ADDR'] = self.id() + '-2v2'
 		a = self.call('/create', {'mode': 'teams', 'color': 'r'})
 		t = {'r': a['player_token']}
 		for _ in range(3):

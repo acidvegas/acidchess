@@ -34,6 +34,9 @@ CACHE_VERSION     = int(time.time())
 ROOMS_LOCK        = threading.RLock()
 SUBSCRIBERS       = {}
 SUBSCRIBERS_LOCK  = threading.Lock()
+STREAMS           = {} # ip -> open /events streams, guarded by SUBSCRIBERS_LOCK
+MAX_IP_ROOMS      = 5  # unfinished rooms one IP may have created
+MAX_IP_STREAMS    = 20 # concurrent /events streams per IP
 MAX_ROOMS         = 500
 ROOM_TIMEOUT      = 24 * 60 * 60
 ROOM_ID_CHARS     = 'abcdefghjkmnpqrstuvwxyz23456789'
@@ -269,10 +272,9 @@ def notify(rid: str):
 def open_room(tc: str, public: bool, quick: bool, rated: bool, color: str, name: str, user_id: int, bot: int = None, game_mode: str = 'classic', options: dict = None) -> tuple:
 	'''Create a room with the caller seated, and the computer opposite them if bot is a level. Returns (room, token, color).'''
 
-	if len(rooms) >= MAX_ROOMS:
-		reap()
 	rid  = make_room_id()
 	room = chess_game.new_room(rid, tc, public, quick, rated, bot, game_mode, options)
+	room['creator_ip'] = request.remote_addr
 	if color not in chess_game.seats(room):
 		color = random.choice(chess_game.seats(room))
 	token = secrets.token_urlsafe(16)
@@ -325,6 +327,18 @@ def reap():
 				chess_game.finish(room, '*', 'abandoned')
 			rooms.pop(rid, None)
 			delete_room(rid)
+
+
+def room_refusal() -> tuple:
+	'''Return an error response if no new room can be opened for the request's IP, otherwise None.'''
+
+	if len(rooms) >= MAX_ROOMS:
+		reap()
+		if len(rooms) >= MAX_ROOMS:
+			return api_error('server full, try again later', 503)
+	if sum(1 for r in rooms.values() if r.get('creator_ip') == request.remote_addr and not r['game']['result']) >= MAX_IP_ROOMS:
+		return api_error(f'you already have {MAX_IP_ROOMS} open rooms, finish or leave one first', 429)
+	return None
 
 
 def rooms_locked(fn):
@@ -567,10 +581,14 @@ def create():
 			return api_error('level must be 1-8')
 		if not ai.available():
 			return api_error('the computer is not available')
+		if refusal := room_refusal():
+			return refusal
 		room, token, color = open_room(data.get('tc'), False, False, False, data.get('color'), name, user_id, bot)
 		return jsonify({'room_id': room['id'], 'player_token': token, 'color': color})
 	if rated and not user_id:
 		return api_error('sign in to play rated games')
+	if refusal := room_refusal():
+		return refusal
 	room, token, color = open_room(data.get('tc'), bool(data.get('public')), False, rated, data.get('color'), name, user_id, None, game_mode, options)
 	return jsonify({'room_id': room['id'], 'player_token': token, 'color': color})
 
@@ -614,9 +632,13 @@ def events():
 	with ROOMS_LOCK:
 		if rid not in rooms:
 			return Response('event: error\ndata: invalid_room\n\n', mimetype='text/event-stream', status=404)
+	ip    = request.remote_addr
 	q     = queue.Queue(maxsize=64)
 	watch = secrets.token_hex(8) if request.args.get('watch') else None
 	with SUBSCRIBERS_LOCK:
+		if STREAMS.get(ip, 0) >= MAX_IP_STREAMS:
+			return Response('event: error\ndata: too_many_streams\n\n', mimetype='text/event-stream', status=429)
+		STREAMS[ip] = STREAMS.get(ip, 0) + 1
 		SUBSCRIBERS.setdefault(rid, []).append(q)
 	if watch:
 		with ROOMS_LOCK:
@@ -645,7 +667,15 @@ def events():
 						rooms[rid]['spectators'].pop(watch, None)
 				notify(rid)
 
-	return Response(stream(), mimetype='text/event-stream', headers={'Cache-Control': 'no-cache, no-transform, no-store', 'X-Accel-Buffering': 'no'})
+	def release():
+		with SUBSCRIBERS_LOCK:
+			STREAMS[ip] -= 1
+			if not STREAMS[ip]:
+				STREAMS.pop(ip)
+
+	resp = Response(stream(), mimetype='text/event-stream', headers={'Cache-Control': 'no-cache, no-transform, no-store', 'X-Accel-Buffering': 'no'})
+	resp.call_on_close(release) # runs once however the stream ends, even if the generator never started
+	return resp
 
 
 @app.route('/favicon.ico')
@@ -749,6 +779,8 @@ def quickplay():
 		if token:
 			changed(room)
 			return jsonify({'room_id': room['id'], 'player_token': token, 'color': color})
+	if refusal := room_refusal():
+		return refusal
 	room, token, color = open_room(tc, True, True, rated, None, name, user_id, None, game_mode)
 	return jsonify({'room_id': room['id'], 'player_token': token, 'color': color})
 

@@ -13,6 +13,7 @@ Online chess in the browser, built with Flask. Standard chess first, then a comp
 - Play the computer at 8 levels, from beginner to full strength *(powered by [Fairy-Stockfish](https://github.com/fairy-stockfish/Fairy-Stockfish))*
 - Create a room and share its 4-character code, or list it in the public lobby
 - Spectators *(open `/<room>?watch`)*
+- Flood limits per IP: 5 unfinished rooms *(computer games included)* and 20 open live update streams
 - Clocks: untimed, 1+0, 3+0, 3+2, 5+0, 10+0, 10+5, 15+10 and 30+0. Clocks start after both sides have moved. Running out of time loses, unless the opponent has no way to mate, which is a draw.
 - Resign, draw offers, abort before the first moves, rematch with colors swapped
 - Drag-and-drop or click-to-move, legal move dots, promotion picker, move list with replay, PGN copy, room chat *(last 100 messages)* with sounds and desktop notifications

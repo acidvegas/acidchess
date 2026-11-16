@@ -34,6 +34,7 @@ class TestArcade(unittest.TestCase):
 		'''Turn arcade mode on with fake sessions.'''
 
 		self.client = server.app.test_client()
+		self.client.environ_base['REMOTE_ADDR'] = self.id() # rooms left open by earlier tests don't count against this one's room limit
 		self.pushed = mock.Mock()
 		self.events = mock.Mock()
 		for patch in (mock.patch.object(arcade, 'event', self.events), mock.patch.object(arcade, 'enabled', return_value=True), mock.patch.object(arcade, 'ARCADE_PUBLIC', 'https://arcade.example'), mock.patch.object(arcade, 'session', side_effect=ACCOUNTS.get), mock.patch.object(arcade, 'push_stats', self.pushed)):
