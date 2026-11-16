@@ -1,2 +1,13 @@
-Flask
-gunicorn[gevent]
+blinker==1.9.0
+click==8.5.1
+Flask==3.1.3
+gevent==26.9.0
+greenlet==3.5.6
+gunicorn==27.0.1
+itsdangerous==2.2.0
+Jinja2==3.1.6
+MarkupSafe==3.0.4
+packaging==26.3
+Werkzeug==3.1.9
+zope.event==6.2
+zope.interface==8.7

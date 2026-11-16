@@ -4,6 +4,7 @@
 
 # Client for acid-arcade-db. Copy this file into a game unchanged. With ARCADE_URL unset the game keeps its own accounts and never calls this.
 
+import http.client
 import json
 import os
 import urllib.error
@@ -18,6 +19,9 @@ ARCADE_KEY    = os.environ.get('ARCADE_KEY', '')                    # this game'
 TIMEOUT       = 5
 COOKIE        = 'arcade_sso' # shared sign-in cookie on the parent domain, e.g. .acid.vegas
 COOKIE_TTL    = 30 * 24 * 60 * 60
+
+if ARCADE_URL and not ARCADE_GAME:
+	raise RuntimeError('ARCADE_URL is set but ARCADE_GAME is empty, set it to this game\'s slug in acid-arcade-db\'s games.json')
 
 
 class ArcadeDown(Exception):
@@ -51,7 +55,7 @@ def call(path: str, body: dict = None) -> dict:
 		except ValueError:
 			message = str(e)
 		raise ArcadeError(message, e.code)
-	except (urllib.error.URLError, OSError) as e:
+	except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException) as e: # ValueError is a reply that is not JSON, HTTPException a broken one such as IncompleteRead
 		raise ArcadeDown(str(e))
 
 
