@@ -4,6 +4,7 @@
 
 set -e
 docker build -t acidchess .
+docker run --rm --user root -v acidchess_data:/data acidchess chown -R app:app /data # data made by older root containers
 docker rm -f acidchess 2>/dev/null || true
 # With ARCADE_URL set, accounts come from acid-arcade-db on the arcade network
 set --
