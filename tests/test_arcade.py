@@ -14,13 +14,14 @@ from unittest import mock
 os.environ.setdefault('ACIDCHESS_DATA_DIR', tempfile.mkdtemp(prefix='acidchess_test_'))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'acidchess'))
 
+import ai
 import app as server
 import arcade
 import auth
 import storage
 
 
-ACCOUNTS = {'tok-ann': {'user_id': 1001, 'username': 'ann', 'admin': False}, 'tok-ben': {'user_id': 1002, 'username': 'ben', 'admin': False}, 'tok-cara': {'user_id': 5001, 'username': 'cara', 'admin': False}, 'tok-dov': {'user_id': 5002, 'username': 'dov', 'admin': False}}
+ACCOUNTS = {'tok-ann': {'user_id': 1001, 'username': 'ann', 'admin': False}, 'tok-ben': {'user_id': 1002, 'username': 'ben', 'admin': False}, 'tok-cara': {'user_id': 5001, 'username': 'cara', 'admin': False}, 'tok-dov': {'user_id': 5002, 'username': 'dov', 'admin': False}, 'tok-eve': {'user_id': 6001, 'username': 'eve', 'admin': False}}
 
 
 class Stop(BaseException):
@@ -37,7 +38,8 @@ class TestArcade(unittest.TestCase):
 		self.client.environ_base['REMOTE_ADDR'] = self.id() # rooms left open by earlier tests don't count against this one's room limit
 		self.pushed = mock.Mock()
 		self.events = mock.Mock()
-		for patch in (mock.patch.object(arcade, 'event', self.events), mock.patch.object(arcade, 'enabled', return_value=True), mock.patch.object(arcade, 'ARCADE_PUBLIC', 'https://arcade.example'), mock.patch.object(arcade, 'session', side_effect=ACCOUNTS.get), mock.patch.object(arcade, 'push_stats', self.pushed)):
+		self.acts   = mock.Mock(return_value={'granted': 0, 'reason': None, 'dup': False})
+		for patch in (mock.patch.object(arcade, 'activity', self.acts), mock.patch.object(arcade, 'event', self.events), mock.patch.object(arcade, 'enabled', return_value=True), mock.patch.object(arcade, 'ARCADE_PUBLIC', 'https://arcade.example'), mock.patch.object(arcade, 'session', side_effect=ACCOUNTS.get), mock.patch.object(arcade, 'push_stats', self.pushed)):
 			patch.start()
 			self.addCleanup(patch.stop)
 
@@ -110,6 +112,58 @@ class TestArcade(unittest.TestCase):
 		with mock.patch.object(arcade, 'ARCADE_PUBLIC', 'https://arcade.{domain}'):
 			self.assertIn(b'data-arcade="https://arcade.supernets.org"', self.client.get('/', base_url='https://chess.supernets.org').data)
 			self.assertIn(b'data-arcade="https://arcade.acid.vegas"', self.client.get('/', base_url='https://chess.acid.vegas').data)
+
+
+	def test_bot_activity(self):
+		'''Every finished game against the computer is reported with the player's own moves, except wins it gave away, aborted games and guests.'''
+
+		def room(result: str, reason: str = 'checkmate', human: str = 'w', user_id: int = 1001, toggles: dict = None, **game) -> dict:
+			bot     = {'name': 'Computer level 5', 'user_id': None, 'bot': 5}
+			me      = {'name': 'ann', 'user_id': user_id}
+			players = {'w': me, 'b': bot} if human == 'w' else {'w': bot, 'b': me}
+			moves   = [{'color': 'wb'[i % 2]} for i in range(41)]
+			return {'id': 'abcd', 'mode': 'classic', 'bot': 5, 'toggles': toggles or {}, 'creator_ip': '203.0.113.9', 'players': players, 'game': {'result': result, 'reason': reason, 'moves': moves, 'ended_at': 1700000000.25, **game}}
+
+		server.bot_activity(room('1-0'))
+		self.assertEqual(self.wait_acts(1)[0], (1001, 'bot_game', 'abcd-1700000000250', '203.0.113.9', {'result': 'win', 'level': 5, 'moves': 21, 'variant': 'classic', 'twists': False}))
+		server.bot_activity(room('1-0', 'resignation', 'b'))
+		server.bot_activity(room('1/2-1/2', 'timeout vs insufficient material', 'b', toggles={'koth': True}))
+		self.assertEqual([(a[4]['result'], a[4]['moves'], a[4]['twists']) for a in self.wait_acts(3)[1:]], [('loss', 20, False), ('draw', 20, True)])
+		for skipped in (room('1-0', 'timeout'), room('0-1', 'timeout', 'b'), room('1-0', bot_random=True), room('*', 'aborted'), room('*', 'abandoned'), room('1-0', user_id=None)):
+			server.bot_activity(skipped)
+		time.sleep(0.2)
+		self.assertEqual(self.acts.call_count, 3)
+		# Losing on time still counts as a loss
+		server.bot_activity(room('0-1', 'timeout'))
+		self.assertEqual(self.wait_acts(4)[3][4]['result'], 'loss')
+
+
+	def test_bot_activity_rooms(self):
+		'''A signed in player's computer games are reported once each, a rematch in the same room gets its own ref, an abort and a guest are not reported.'''
+
+		with mock.patch.object(ai, 'available', return_value=True), mock.patch.object(ai, 'best_move', return_value='e7e5'):
+			a = self.call('/create', {'bot': 4, 'color': 'w'}, 'tok-eve')
+			self.call('/abort', {'room_id': a['room_id'], 'player_token': a['player_token']})
+			g = self.call('/create', {'bot': 4, 'color': 'w'})
+			self.call('/resign', {'room_id': g['room_id'], 'player_token': g['player_token']})
+			a   = self.call('/create', {'bot': 4, 'color': 'w'}, 'tok-eve')
+			rid = a['room_id']
+			self.call('/move', {'room_id': rid, 'player_token': a['player_token'], 'uci': 'e2e4'})
+			end = time.time() + 5
+			while len(server.rooms[rid]['game']['moves']) < 2 and time.time() < end:
+				time.sleep(0.05)
+			self.call('/resign', {'room_id': rid, 'player_token': a['player_token']})
+			self.call('/chat', {'room_id': rid, 'player_token': a['player_token'], 'text': 'gg'})
+			self.call('/rematch', {'room_id': rid, 'player_token': a['player_token']})
+			end = time.time() + 5
+			while len(server.rooms[rid]['game']['moves']) < 1 and time.time() < end:
+				time.sleep(0.05)
+			self.call('/resign', {'room_id': rid, 'player_token': a['player_token']})
+		acts = self.wait_acts(2)
+		self.assertEqual([(x[0], x[1], x[4]) for x in acts], [(6001, 'bot_game', {'result': 'loss', 'level': 4, 'moves': 1, 'variant': 'classic', 'twists': False}), (6001, 'bot_game', {'result': 'loss', 'level': 4, 'moves': 0, 'variant': 'classic', 'twists': False})])
+		self.assertTrue(acts[0][2].startswith(f'{rid}-'))
+		self.assertNotEqual(acts[0][2], acts[1][2])
+		self.assertEqual(acts[0][3], self.id())
 
 
 	def test_computer_event(self):
@@ -245,6 +299,16 @@ class TestArcade(unittest.TestCase):
 		self.assertEqual((main, stats), (1220, {'Classic Elo': 1220, 'Games': 1, 'Wins': 1, 'Losses': 0, 'Draws': 0, 'Bot wins': 1, 'Bot losses': 0, 'Bot draws': 1}))
 
 
+	def wait_acts(self, count: int) -> list:
+		'''Wait for activity reports and return their (user id, kind, ref, ip, data).'''
+
+		end = time.time() + 5
+		while self.acts.call_count < count and time.time() < end:
+			time.sleep(0.05)
+		self.assertEqual(self.acts.call_count, count)
+		return [c.args for c in self.acts.call_args_list]
+
+
 	def wait_events(self, count: int) -> list:
 		'''Wait for activity feed events and return their (user id, kind, text).'''
 
@@ -282,21 +346,24 @@ class TestStandalone(unittest.TestCase):
 
 
 	def test_no_feed(self):
-		'''A finished rated game and the home page send no events, stats or presence.'''
+		'''A finished rated game, a computer game and the home page send no events, stats, presence or activity.'''
 
 		client = server.app.test_client()
 		tokens = []
 		for name in ('solo_w', 'solo_b'):
 			cap = client.get('/auth/captcha').get_json()
 			tokens.append(client.post('/auth/signup', json={'username': name, 'password': 'hunter22x', 'captcha_id': cap['captcha_id'], 'captcha': auth.CAPTCHAS[cap['captcha_id']][0]}).get_json()['token'])
-		with mock.patch.object(arcade, 'event') as event, mock.patch.object(arcade, 'push_stats') as push, mock.patch.object(arcade, 'presence') as presence, mock.patch.object(arcade, 'session') as session:
+		with mock.patch.object(arcade, 'event') as event, mock.patch.object(arcade, 'push_stats') as push, mock.patch.object(arcade, 'presence') as presence, mock.patch.object(arcade, 'session') as session, mock.patch.object(arcade, 'activity') as activity, mock.patch.object(ai, 'available', return_value=True), mock.patch.object(ai, 'best_move', return_value='e7e5'):
+			c = client.post('/create', json={'bot': 1, 'color': 'b'}, headers={'X-Auth-Token': tokens[0]}).get_json()
+			client.post('/resign', json={'room_id': c['room_id'], 'player_token': c['player_token']})
 			a = client.post('/create', json={'rated': True, 'color': 'w'}, headers={'X-Auth-Token': tokens[0]}).get_json()
 			b = client.post('/join', json={'room_id': a['room_id']}, headers={'X-Auth-Token': tokens[1]}).get_json()
 			client.post('/resign', json={'room_id': a['room_id'], 'player_token': b['player_token']})
 			client.get('/online', headers={'X-Auth-Token': tokens[0]})
 			time.sleep(0.2)
 			self.assertEqual(server.rooms[a['room_id']]['game']['result'], '1-0')
-			for fn in (event, push, presence, session):
+			self.assertEqual(server.rooms[c['room_id']]['game']['result'], '1-0')
+			for fn in (event, push, presence, session, activity):
 				fn.assert_not_called()
 		self.assertNotIn('old_peaks', server.rooms[a['room_id']]['game'])
 

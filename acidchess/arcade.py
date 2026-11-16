@@ -36,6 +36,16 @@ class ArcadeError(Exception):
 		self.status = status
 
 
+def activity(user_id: int, kind: str, ref: str, ip: str, data: dict) -> dict:
+	'''Report something a signed in player did, for casino chip rewards and daily missions. Returns {granted, reason, dup}: granted is the cents it earned.
+
+	:param ref: unique per event and player (at most 64 characters), a repeat is ignored
+	:param ip: the player's address (request.remote_addr behind a trusted proxy), used to limit rewards per address
+	'''
+
+	return call('/internal/activity', {'game': ARCADE_GAME, 'user_id': user_id, 'kind': kind, 'ref': ref, 'ip': ip, 'data': data})
+
+
 def avatar_url(user_id: int, host: str) -> str:
 	'''Return the public URL of a player's profile picture, on the arcade of the same domain as host.'''
 
@@ -133,6 +143,18 @@ def push_stats(user_id: int, main: float, stats: dict):
 	'''Store a player's summary for this game: main is the leaderboard number (higher is better), stats is shown on their profile.'''
 
 	call('/internal/stats', {'game': ARCADE_GAME, 'user_id': user_id, 'main': main, 'stats': stats})
+
+
+def rewards_ack(ids: list) -> int:
+	'''Casino only: mark rewards as paid. Returns how many were still unpaid.'''
+
+	return call('/internal/rewards/ack', {'game': ARCADE_GAME, 'ids': list(ids)})['acked']
+
+
+def rewards_pending() -> list:
+	'''Casino only: return up to 200 unpaid rewards of accounts at least a day old: [{id, user_id, amount, note}], amount in cents.'''
+
+	return call('/internal/rewards/pending', {'game': ARCADE_GAME})['rewards']
 
 
 def session(token: str) -> dict:

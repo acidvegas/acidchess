@@ -157,6 +157,33 @@ def arcade_sync():
 		time.sleep(60)
 
 
+def bot_activity(room: dict):
+	'''Report a finished game against the computer to acid-arcade-db from a background thread, for casino chip rewards.
+
+	A win the computer gave away is not reported: it ran out of time, or the engine failed and it played a random move.
+	'''
+
+	game   = room['game']
+	human  = 'b' if room['players']['w'].get('bot') else 'w'
+	player = room['players'][human]
+	if not player['user_id'] or game['result'] not in ('1-0', '0-1', '1/2-1/2'):
+		return
+	won = game['result'] == ('1-0' if human == 'w' else '0-1')
+	if won and (game['reason'] == 'timeout' or game.get('bot_random')):
+		return
+	result = 'win' if won else 'draw' if game['result'] == '1/2-1/2' else 'loss'
+	data   = {'result': result, 'level': room['bot'], 'moves': sum(1 for m in game['moves'] if m['color'] == human), 'variant': chess_game.mode(room), 'twists': bool(room.get('toggles'))}
+	ref    = f'{room["id"]}-{int(game["ended_at"] * 1000)}' # a rematch plays on in the same room
+
+	def send():
+		try:
+			arcade.activity(player['user_id'], 'bot_game', ref, room.get('creator_ip') or '', data)
+		except Exception as e:
+			print(f'activity({player["user_id"]}, bot_game) failed: {e}')
+
+	threading.Thread(target=send, daemon=True).start()
+
+
 def bot_turn(rid: str, game: dict, color: str, level: int):
 	'''Background thread: get the computer's move and play it, unless the game moved on meanwhile.'''
 
@@ -171,6 +198,7 @@ def bot_turn(rid: str, game: dict, color: str, level: int):
 			if uci not in legal:
 				print(f'engine gave {uci!r} in room {rid}, playing a random move')
 				uci = random.choice(legal)
+				game['bot_random'] = True # a win against a computer that played blind earns no reward
 			chess_game.make_move(room, color, uci)
 			changed(room)
 	finally:
@@ -187,6 +215,8 @@ def changed(room: dict):
 		game['stats_pushed'] = True
 		push_stats([p['user_id'] for p in room['players'].values() if p and p['user_id']])
 		announce(room)
+		if room.get('bot'):
+			bot_activity(room)
 	save_room(room['id'], room)
 	notify(room['id'])
 

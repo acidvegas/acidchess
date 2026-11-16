@@ -151,6 +151,8 @@ Set these environment variables to turn it on:
 
 In this mode sign up, log in and log out go to acid-arcade-db, so the same username and password work on every game. Signing in or out on one site of a domain *(e.g. `chess.acid.vegas`)* does the same on the other sites of that domain through a shared cookie. Password, picture and account deletion are managed on the acid-arcade-db site. Ratings and games stay in this game's database, and each player's Elo and record are sent to acid-arcade-db after every rated or computer game. Renames and deleted accounts are picked up once a minute. If acid-arcade-db is down, requests that need an account answer `503`.
 
+Every finished game a signed in player plays against the computer is reported to acid-arcade-db as a `bot_game` *(result, level, the player's own move count)*, which pays casino chips for wins. A win the computer gave away is not reported: it ran out of time, or the engine failed and it played a random move. Aborted and abandoned games are never reported, and the computer takes no draws or takebacks.
+
 With `ARCADE_URL` exported, `./setup.sh` also puts the container on the `arcade` Docker network and passes the variables above *(`ARCADE_PUBLIC_URL` defaults to `https://arcade.{domain}`)*.
 
 ## Tests
