@@ -83,7 +83,7 @@
 	<header class="topbar">
 		<h1 class="logo-h"><a class="logo" href="/"><svg class="ico logo-ico"><use href="#i-knight"/></svg>acid<span>chess</span></a></h1>
 		<div class="account">
-			<button class="icon-btn" id="btn-help" title="How to play"><svg class="ico"><use href="#i-help"/></svg></button>
+			<button class="icon-btn" id="btn-help" title="How to play" aria-label="How to play"><svg class="ico"><use href="#i-help"/></svg></button>
 			<svg class="ico" id="account-icon"><use href="#i-user"/></svg><img class="avatar hidden" id="account-avatar" alt=""><span id="account-name">Guest</span>
 			<button class="icon-btn" id="btn-signin" title="Sign in" aria-label="Sign in"><svg class="ico"><use href="#i-login"/></svg></button>
 			<button class="icon-btn hidden" id="btn-profile" title="Stats" aria-label="Stats"><svg class="ico"><use href="#i-chart"/></svg></button>
@@ -93,7 +93,7 @@
 
 	<main id="home" class="hidden">
 		<section class="panel">
-			<input type="text" id="guest-name" maxlength="16" placeholder="Guest name" autocomplete="off" spellcheck="false">
+			<input type="text" id="guest-name" maxlength="16" placeholder="Guest name" aria-label="Guest name" autocomplete="off" spellcheck="false">
 			<div class="tabs">
 				<button class="tab active" data-tab="quick"><svg class="ico"><use href="#i-bolt"/></svg><span class="wide">Quick play</span><span class="narrow">Quick</span></button>
 				<button class="tab" data-tab="computer"><svg class="ico"><use href="#i-cpu"/></svg><span class="wide">Computer</span><span class="narrow">Bot</span></button>
@@ -108,7 +108,7 @@
 				<label class="check"><input type="checkbox" id="quick-rated"> Rated</label>
 				<button class="btn primary" id="btn-quick"><svg class="ico"><use href="#i-bolt"/></svg>Find a game</button>
 				<div class="row">
-					<input type="text" id="join-code" maxlength="4" placeholder="Room code" autocomplete="off" spellcheck="false">
+					<input type="text" id="join-code" maxlength="4" placeholder="Room code" aria-label="Room code" autocomplete="off" spellcheck="false">
 					<button class="btn" id="btn-join"><svg class="ico"><use href="#i-enter"/></svg>Join</button>
 				</div>
 			</div>
@@ -150,7 +150,7 @@
 				<img class="avatar hidden" alt=""><span class="pname"></span><span class="prating"></span><span class="checks"></span><span class="captured"></span><span class="clock"></span>
 			</div>
 			<div class="board-wrap">
-				<div id="board"></div>
+				<div id="board" role="group" aria-label="Chess board"></div>
 				<div id="promotion" class="hidden"></div>
 			</div>
 			<div class="player-bar" id="bar-bottom">
@@ -167,9 +167,9 @@
 			<div class="status-row">
 				<div id="status" class="status"></div>
 				<span class="alerts">
-					<button class="icon-btn" id="btn-sound" title="Sounds"><svg class="ico"><use href="#i-sound"/></svg></button>
-					<button class="icon-btn" id="btn-game-help" title="Rules for this game"><svg class="ico"><use href="#i-help"/></svg></button>
-					<button class="icon-btn" id="btn-notify" title="Desktop notifications"><svg class="ico"><use href="#i-bell-off"/></svg></button>
+					<button class="icon-btn" id="btn-sound" title="Sounds" aria-label="Sounds"><svg class="ico"><use href="#i-sound"/></svg></button>
+					<button class="icon-btn" id="btn-game-help" title="Rules for this game" aria-label="Rules for this game"><svg class="ico"><use href="#i-help"/></svg></button>
+					<button class="icon-btn" id="btn-notify" title="Desktop notifications" aria-label="Desktop notifications"><svg class="ico"><use href="#i-bell-off"/></svg></button>
 				</span>
 			</div>
 			<div id="recon-bar" class="offer hidden">
@@ -191,12 +191,12 @@
 				<div class="sheet-head"><span>Moves</span><button class="icon-btn" data-close-sheet title="Close" aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button></div>
 				<div class="moves" id="moves"></div>
 				<div class="nav">
-					<button class="btn small" data-nav="first" title="First move"><svg class="ico"><use href="#i-first"/></svg></button>
-					<button class="btn small" data-nav="prev" title="Prev move"><svg class="ico"><use href="#i-prev"/></svg></button>
-					<button class="btn small" data-nav="next" title="Next move"><svg class="ico"><use href="#i-next"/></svg></button>
-					<button class="btn small" data-nav="last" title="Last move"><svg class="ico"><use href="#i-last"/></svg></button>
-					<button class="btn small" id="btn-flip" title="Flip board"><svg class="ico"><use href="#i-flip"/></svg></button>
-					<button class="btn small desk-only" id="btn-toggle-moves" title="Hide move list"><svg class="ico"><use href="#i-list"/></svg></button>
+					<button class="btn small" data-nav="first" title="First move" aria-label="First move"><svg class="ico"><use href="#i-first"/></svg></button>
+					<button class="btn small" data-nav="prev" title="Prev move" aria-label="Previous move"><svg class="ico"><use href="#i-prev"/></svg></button>
+					<button class="btn small" data-nav="next" title="Next move" aria-label="Next move"><svg class="ico"><use href="#i-next"/></svg></button>
+					<button class="btn small" data-nav="last" title="Last move" aria-label="Last move"><svg class="ico"><use href="#i-last"/></svg></button>
+					<button class="btn small" id="btn-flip" title="Flip board" aria-label="Flip board"><svg class="ico"><use href="#i-flip"/></svg></button>
+					<button class="btn small desk-only" id="btn-toggle-moves" title="Hide move list" aria-label="Hide move list"><svg class="ico"><use href="#i-list"/></svg></button>
 				</div>
 			</div>
 			<div class="actions">
@@ -214,7 +214,7 @@
 				<div class="sheet-head"><span>Chat</span><button class="icon-btn" data-close-sheet title="Close" aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button></div>
 				<div class="chat">
 					<div class="chat-log" id="chat-log"></div>
-					<input type="text" id="chat-input" maxlength="200" placeholder="Say something" autocomplete="off">
+					<input type="text" id="chat-input" maxlength="200" placeholder="Say something" aria-label="Chat message" autocomplete="off">
 				</div>
 			</div>
 		</aside>
@@ -226,14 +226,14 @@
 
 	<div id="modal" class="overlay hidden">
 		<div class="modal">
-			<button class="close" id="modal-close">&times;</button>
+			<button class="close" id="modal-close" aria-label="Close">&times;</button>
 			<div id="modal-body"></div>
 		</div>
 	</div>
 
 	<div id="twists-modal" class="overlay hidden">
 		<div class="modal">
-			<button class="close" id="twists-close">&times;</button>
+			<button class="close" id="twists-close" aria-label="Close">&times;</button>
 			<h2>Twists</h2>
 			<p class="result-sub twists-note">Stack as many as you like. Twisted games are always casual.</p>
 			<div class="twists" id="create-twists">
@@ -255,7 +255,7 @@
 
 	<div id="help-modal" class="overlay hidden">
 		<div class="modal help">
-			<button class="close" id="help-close">&times;</button>
+			<button class="close" id="help-close" aria-label="Close">&times;</button>
 			<h2>How to play</h2>
 			<section data-help="basics">
 				<h3>Basics</h3>
@@ -309,6 +309,7 @@
 	</div>
 
 	<div id="toast" class="toast hidden"></div>
+	<div id="sr-live" class="sr-only" aria-live="polite"></div>
 
 	<script src="{{ url_for('static', filename='utils.js') }}?v={{ cache_v }}"></script>
 </body>

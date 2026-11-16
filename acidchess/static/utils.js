@@ -10,6 +10,7 @@ const DROP_RE = /^([A-Z])@([a-n]\d+)$/;
 const FOUR = ['r', 'b', 'y', 'g'];
 const ARCADE = document.body.dataset.arcade; // acid-arcade-db public URL, empty when the site keeps its own accounts
 const FOUR_NAMES = { r: 'Red', b: 'Blue', y: 'Yellow', g: 'Green' };
+const PIECE_NAMES = { P: 'pawn', N: 'knight', B: 'bishop', R: 'rook', Q: 'queen', K: 'king', A: 'archbishop', C: 'chancellor', M: 'amazon', O: 'cannon', G: 'grasshopper', H: 'nightrider', L: 'camel' };
 const LEVEL_NAMES = ['Beginner', 'Novice', 'Casual', 'Club', 'Strong club', 'Expert', 'Master', 'Maximum'];
 const REASONS = {
 	'checkmate': 'by checkmate',
@@ -139,6 +140,12 @@ function pieceUrl(ch) {
 	return `/static/pieces/${color}${ch.toUpperCase()}.svg`;
 }
 
+// Spoken name of a piece: a FEN letter, or a 4-player color and letter such as rN
+function pieceName(ch) {
+	if (ch.length === 2) return `${FOUR_NAMES[ch[0]].toLowerCase()} ${PIECE_NAMES[ch[1]] || ch[1]}`;
+	return `${ch === ch.toUpperCase() ? 'white' : 'black'} ${PIECE_NAMES[ch.toUpperCase()] || ch}`;
+}
+
 function sqName(i) { return FILES[i % W()] + (Math.floor(i / W()) + 1); }
 
 function sqIndex(name) { return (parseInt(name.slice(1), 10) - 1) * W() + FILES.indexOf(name[0]); }
@@ -146,9 +153,17 @@ function sqIndex(name) { return (parseInt(name.slice(1), 10) - 1) * W() + FILES.
 function toast(text) {
 	const t = $('toast');
 	t.textContent = text;
+	say(text);
 	t.classList.remove('hidden');
 	clearTimeout(t._timer);
 	t._timer = setTimeout(() => t.classList.add('hidden'), 2500);
+}
+
+function say(text) {
+	// Screen readers read the hidden live region, cleared first so the same text twice is read again
+	const el = $('sr-live');
+	el.textContent = '';
+	setTimeout(() => { el.textContent = text; }, 50);
 }
 
 function openModal(html) {
@@ -215,9 +230,9 @@ async function showAuth(mode) {
 	openModal(`
 		<h2>${signup ? 'Create account' : 'Sign in'}</h2>
 		<form id="auth-form">
-			<input type="text" id="auth-user" placeholder="Username" maxlength="16" autocomplete="username" required>
-			<input type="password" id="auth-pass" placeholder="Password" maxlength="128" autocomplete="${signup ? 'new-password' : 'current-password'}" required>
-			${signup ? '<div class="captcha" id="captcha" title="Click for a new one"></div><input type="text" id="auth-captcha" placeholder="Captcha" maxlength="5" autocomplete="off" required>' : ''}
+			<input type="text" id="auth-user" placeholder="Username" aria-label="Username" maxlength="16" autocomplete="username" required>
+			<input type="password" id="auth-pass" placeholder="Password" aria-label="Password" maxlength="128" autocomplete="${signup ? 'new-password' : 'current-password'}" required>
+			${signup ? '<div class="captcha" id="captcha" title="Click for a new one" role="img" aria-label="Captcha"></div><input type="text" id="auth-captcha" placeholder="Captcha" aria-label="Captcha" maxlength="5" autocomplete="off" required>' : ''}
 			<div class="error" id="auth-error"></div>
 			<button class="btn primary" type="submit">${signup ? 'Sign up' : 'Sign in'}</button>
 			<button class="link" type="button" id="auth-switch">${signup ? 'Have an account? Sign in' : 'New here? Create an account'}</button>
@@ -331,7 +346,7 @@ async function loadLobby() {
 	const data = await api('/lobby');
 	const rows = (data.rooms || []).map((r) => `
 		<tr><td class="name">${avatar(r.user_id)}${esc(r.name)}</td><td>${r.rating ?? '-'}</td><td>${esc(modeNames[r.mode] || r.mode)}${r.rated ? ' · Rated' : ''}${twistsText(r.toggles) ? `<br><small>${esc(twistsText(r.toggles))}</small>` : ''}</td><td>${esc(r.tc || '∞')}</td>
-		<td><button class="btn small" data-join="${r.room_id}">${icon('enter')}<span class="lbl">Join</span>${r.seats > 2 ? `<span>${r.seated}/${r.seats}</span>` : ''}</button></td></tr>`).join('');
+		<td><button class="btn small" data-join="${r.room_id}" aria-label="Join ${esc(r.name)}">${icon('enter')}<span class="lbl">Join</span>${r.seats > 2 ? `<span>${r.seated}/${r.seats}</span>` : ''}</button></td></tr>`).join('');
 	$('lobby-rows').innerHTML = rows;
 	$('lobby-empty').classList.toggle('hidden', !!rows);
 	$('lobby-rows').querySelectorAll('[data-join]').forEach((b) => b.onclick = () => joinRoom(b.dataset.join));
@@ -364,7 +379,7 @@ async function loadTimeControls() {
 	$('create-tc').value = '';
 	$('bot-tc').innerHTML = $('create-tc').innerHTML;
 	$('bot-tc').value = '';
-	$('level-grid').innerHTML = data.bot ? LEVEL_NAMES.map((n, i) => `<button class="btn" data-level="${i + 1}">${i + 1}<small>${n}</small></button>`).join('') : '';
+	$('level-grid').innerHTML = data.bot ? LEVEL_NAMES.map((n, i) => `<button class="btn" data-level="${i + 1}" aria-label="Level ${i + 1}, ${n}">${i + 1}<small>${n}</small></button>`).join('') : '';
 	$('bot-missing').classList.toggle('hidden', !!data.bot);
 	$('level-grid').querySelectorAll('[data-level]').forEach((b) => b.onclick = () => playComputer(+b.dataset.level));
 }
@@ -474,13 +489,15 @@ function setState(data) {
 	// The chat is capped at 100 messages, so compare the newest message rather than the count
 	const lastChat = (chat) => chat.length ? chat[chat.length - 1].at : 0;
 	const chatChanged = !st || lastChat(st.chat) !== lastChat(data.chat);
+	const prevStatus = $('status').textContent;
 	st = data;
 	fetchedAt = performance.now();
 	if (viewPly !== null && st.moves.length !== prevMoves) viewPly = null;
 	if (st.moves.length !== prevMoves) selected = null;
 	render();
 	if (chatChanged) renderChat();
-	if (prev && prev.id === st.id) announce(prev);
+	if (prev && prev.id === st.id) { announce(prev); speak(prev, prevStatus); }
+	else say($('status').textContent);
 	if (st.result && lastResult === null && prevMoves !== -1) showResult();
 	lastResult = st.result;
 }
@@ -564,12 +581,35 @@ function announce(prev) {
 	}
 }
 
+function speak(prev, prevStatus) {
+	// What a screen reader hears after an update: new moves, the status line when it changes, offers, recon notices and chat from others
+	const mine = st.color;
+	const side = (c) => st.board4 ? FOUR_NAMES[c] : c === 'w' ? 'White' : 'Black';
+	const first = (st.start_fen || '').split(' ')[1] || 'w';
+	const parts = [];
+	st.moves.slice(prev.moves.length).forEach((m, n) => {
+		const c = m.color || ((prev.moves.length + n) % 2 === 0 ? first : first === 'w' ? 'b' : 'w');
+		parts.push(`${st.players[c] ? `${st.players[c].name} (${side(c)})` : side(c)} played ${m.san}`);
+	});
+	if ($('status').textContent !== prevStatus || parts.length) parts.push($('status').textContent);
+	if (mine && !st.result && st.draw_offer && st.draw_offer !== mine && prev.draw_offer !== st.draw_offer) parts.push('Opponent offers a draw');
+	if (mine && st.rematch && prev.rematch && st.rematch.length > prev.rematch.length && !st.rematch.includes(mine)) parts.push('Rematch requested');
+	const seen = new Set((prev.notices || []).map((n) => `${n.ply} ${n.text}`));
+	if (st.mode === 'recon' && mine) for (const n of st.notices || []) if (!seen.has(`${n.ply} ${n.text}`)) parts.push(n.text);
+	const last = st.chat[st.chat.length - 1];
+	const prevLast = prev.chat[prev.chat.length - 1];
+	if (last && (!prevLast || last.at !== prevLast.at) && last.color !== mine) parts.push(`${last.name} says: ${last.text}`);
+	if (parts.length) say(parts.join('. '));
+}
+
 function renderAlerts() {
 	$('btn-sound').innerHTML = icon(soundOn() ? 'sound' : 'mute');
 	$('btn-sound').classList.toggle('off', !soundOn());
+	$('btn-sound').setAttribute('aria-pressed', soundOn());
 	$('btn-notify').innerHTML = icon(notifyOn() ? 'bell' : 'bell-off');
 	$('btn-notify').classList.toggle('off', !notifyOn());
 	$('btn-notify').title = !notifyAvailable() ? 'Desktop notifications need the site on HTTPS' : notifyOn() ? 'Desktop notifications on' : 'Desktop notifications off';
+	$('btn-notify').setAttribute('aria-label', $('btn-notify').title);
 }
 
 function orientation() {
@@ -632,6 +672,7 @@ function renderBoard4() {
 	el.style.gridTemplateColumns = 'repeat(14, 1fr)';
 	el.style.gridTemplateRows = 'repeat(14, 1fr)';
 	document.documentElement.style.setProperty('--ratio', 1);
+	el.setAttribute('aria-label', `4-player chess board, ${FOUR_NAMES[FOUR[turns]]} at the bottom`);
 	for (let row = 0; row < 14; row++) {
 		for (let col = 0; col < 14; col++) {
 			const i = rotate4((13 - row) * 14 + col, turns);
@@ -639,7 +680,7 @@ function renderBoard4() {
 			const r = Math.floor(i / 14);
 			const sq = document.createElement('div');
 			sq.dataset.sq = i;
-			if (!st.valid[i]) { sq.className = 'sq void'; el.appendChild(sq); continue; }
+			if (!st.valid[i]) { sq.className = 'sq void'; sq.setAttribute('aria-hidden', 'true'); el.appendChild(sq); continue; }
 			sq.className = `sq ${(r + f) % 2 ? 'light' : 'dark'}`;
 			if (last && (i === last.from || i === last.to)) sq.classList.add('last');
 			if (i === selected) sq.classList.add('sel');
@@ -651,6 +692,13 @@ function renderBoard4() {
 				p.style.backgroundImage = `url(${pieceUrl(b[i])})`;
 				sq.appendChild(p);
 			}
+			const label = [sqName(i), b[i] ? pieceName(b[i]) + (st.alive.includes(b[i][0]) ? '' : ', out') : 'empty'];
+			if (last && (i === last.from || i === last.to)) label.push('last move');
+			if (i === selected) label.push('selected');
+			if (st.check && b[i] === st.turn + 'K') label.push('in check');
+			if (targets.includes(i)) label.push(b[i] ? 'can capture' : 'can move here');
+			sq.setAttribute('role', 'img');
+			sq.setAttribute('aria-label', label.join(', '));
 			el.appendChild(sq);
 		}
 	}
@@ -668,7 +716,7 @@ function renderFourPlayers() {
 		const diff = st.rating_diff && st.rating_diff[c] !== undefined ? ` ${st.rating_diff[c] >= 0 ? '+' : ''}${st.rating_diff[c]}` : '';
 		const tag = place ? ['', '1st', '2nd', '3rd', '4th'][place] : out ? 'out' : '';
 		return `<div class="fp${st.turn === c && !st.result ? ' turn' : ''}${out ? ' out' : ''}${c === st.color ? ' me' : ''}" data-color="${c}">
-			<span class="dot ${c}"></span>${avatar(p && p.user_id)}<span class="pname">${esc(p ? p.name : 'Waiting…')}</span>
+			<span class="dot ${c}"></span><span class="sr-only">${FOUR_NAMES[c]}${st.turn === c && !st.result ? ', to move' : ''}: </span>${avatar(p && p.user_id)}<span class="pname">${esc(p ? p.name : 'Waiting…')}</span>
 			<span class="prating">${p && p.rating ? `(${p.rating}${diff})` : ''}</span>
 			<span class="tag">${tag}</span><span class="clock"></span></div>`;
 	}).join('');
@@ -699,6 +747,7 @@ function renderBoard() {
 	el.style.gridTemplateColumns = `repeat(${W()}, 1fr)`;
 	el.style.gridTemplateRows = `repeat(${H()}, 1fr)`;
 	document.documentElement.style.setProperty('--ratio', H() / W());
+	el.setAttribute('aria-label', `${W()} by ${H()} chess board, ${white ? 'white' : 'black'} at the bottom`);
 	for (let row = 0; row < H(); row++) {
 		for (let col = 0; col < W(); col++) {
 			const r = white ? H() - 1 - row : row;
@@ -713,7 +762,8 @@ function renderBoard() {
 			if (last && (i === last.from || i === last.to)) sq.classList.add('last');
 			if (i === selected) sq.classList.add('sel');
 			if (inCheck && board[i] === king) sq.classList.add('check');
-			if (targets.includes(i)) sq.classList.add('move', board[i] || (board[selected] || '').toLowerCase() === 'p' && i % W() !== selected % W() ? 'cap' : 'none');
+			const cap = targets.includes(i) && (board[i] || (board[selected] || '').toLowerCase() === 'p' && i % W() !== selected % W());
+			if (targets.includes(i)) sq.classList.add('move', cap ? 'cap' : 'none');
 			if (row === H() - 1) sq.insertAdjacentHTML('beforeend', `<span class="coord file">${FILES[f]}</span>`);
 			if (col === 0) sq.insertAdjacentHTML('beforeend', `<span class="coord rank">${r + 1}</span>`);
 			if (sensed.includes(sqName(i))) sq.classList.add('sensed');
@@ -733,6 +783,17 @@ function renderBoard() {
 				sq.appendChild(p);
 				if (g.age > 0) sq.insertAdjacentHTML('beforeend', `<span class="ghost-age">${g.age}</span>`);
 			}
+			const g = ghosts[sqName(i)];
+			const label = [sqName(i), board[i] === '*' ? 'wall' : board[i] ? pieceName(board[i]) : g ? `${g.piece === '?' ? 'unknown piece' : pieceName(g.piece)} last seen${g.age > 0 ? ` ${g.age} turn${g.age === 1 ? '' : 's'} ago` : ''}` : 'empty'];
+			if (hill.includes(sqName(i))) label.push('hill');
+			if (live && (st.stars || []).includes(sqName(i))) label.push('bonus square');
+			if (last && (i === last.from || i === last.to)) label.push('last move');
+			if (i === selected) label.push('selected');
+			if (inCheck && board[i] === king) label.push('in check');
+			if (targets.includes(i)) label.push(cap ? 'can capture' : 'can move here');
+			if (sensed.includes(sqName(i))) label.push('sensed');
+			sq.setAttribute('role', 'img');
+			sq.setAttribute('aria-label', label.join(', '));
 			el.appendChild(sq);
 		}
 	}
@@ -765,7 +826,7 @@ function renderBars() {
 
 function handHtml(color) {
 	const hand = st.hand[color] || {};
-	return Object.entries(hand).map(([k, n]) => `<span class="slot${selected === k && st.color === color ? ' sel' : ''}" data-drop="${color === st.color ? k : ''}"><img src="${pieceUrl(color === 'w' ? k : k.toLowerCase())}" alt="">${n > 1 ? `<i>${n}</i>` : ''}</span>`).join('');
+	return Object.entries(hand).map(([k, n]) => `<span class="slot${selected === k && st.color === color ? ' sel' : ''}" data-drop="${color === st.color ? k : ''}"><img src="${pieceUrl(color === 'w' ? k : k.toLowerCase())}" alt="${pieceName(color === 'w' ? k : k.toLowerCase())}">${n > 1 ? `<i>${n}</i>` : ''}</span>`).join('');
 }
 
 function capturedHtml(board, color) {
@@ -785,7 +846,7 @@ function capturedHtml(board, color) {
 	for (const k of Object.keys(start).sort((a, b) => value(a) - value(b))) {
 		const missing = Math.max(0, start[k] - (count[k] || 0));
 		const ch = color === 'w' ? k : k.toUpperCase();
-		for (let n = 0; n < missing; n++) html += `<img src="${pieceUrl(ch)}" alt="">`;
+		for (let n = 0; n < missing; n++) html += `<img src="${pieceUrl(ch)}" alt="${pieceName(ch)}">`;
 	}
 	return html + (material > 0 ? `<b>+${material}</b>` : '');
 }
@@ -1086,7 +1147,7 @@ function choosePromotion(from, to, options) {
 	const box = $('promotion');
 	const color = st.color;
 	const art = (k) => st.board4 ? pieceUrl(color + k.toUpperCase()) : pieceUrl(color === 'w' ? k.toUpperCase() : k);
-	box.innerHTML = options.map((k) => `<button data-p="${k}" style="background-image:url(${art(k)})"></button>`).join('');
+	box.innerHTML = options.map((k) => `<button data-p="${k}" aria-label="Promote to ${PIECE_NAMES[k.toUpperCase()] || k}" style="background-image:url(${art(k)})"></button>`).join('');
 	box.classList.remove('hidden');
 	box.querySelectorAll('button').forEach((b) => b.onclick = (e) => {
 		e.stopPropagation();
@@ -1287,6 +1348,7 @@ function init() {
 		document.querySelector('.side').classList.toggle('moves-off', !on);
 		$('btn-toggle-moves').classList.toggle('off', !on);
 		$('btn-toggle-moves').title = on ? 'Hide move list' : 'Show move list';
+		$('btn-toggle-moves').setAttribute('aria-label', $('btn-toggle-moves').title);
 	};
 	showMoves(localStorage.getItem('acidchess_moves') !== 'off');
 	$('btn-toggle-moves').onclick = () => {
