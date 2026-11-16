@@ -19,6 +19,7 @@ Online chess in the browser, built with Flask. Standard chess first, then a comp
 - Drag-and-drop or click-to-move, legal move dots, promotion picker, move list with replay, PGN copy, room chat *(last 100 messages)* with sounds and desktop notifications
 - A help popup explaining the modes, twists and new pieces, and an in-game version showing only what applies to that game
 - Optional accounts *(username, password and a captcha)* with Elo ratings, a leaderboard and a win/loss record against each computer level
+- Standalone logins lock after 10 failures per account or 30 per IP in 15 minutes, and each IP gets 30 captchas a minute
 
 ## Rating
 

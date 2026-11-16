@@ -23,7 +23,7 @@ import engine
 import fourgame
 import game as chess_game
 import toggles
-from auth import SEEN, USERNAME_RE, captcha_create, captcha_verify, create_session, delete_session, request_token, request_user
+from auth import SEEN, USERNAME_RE, attempt, blocked, captcha_create, captcha_verify, create_session, delete_session, request_token, request_user
 from storage import DB_LOCK, db_connect, delete_room, delete_user, get_user, init_db, leaderboard, load_rooms, mirror_user, prune_sessions, rating_of, save_room, summary
 
 
@@ -472,6 +472,9 @@ def auth_captcha():
 
 	if arcade.enabled():
 		return jsonify(arcade.captcha())
+	if blocked('captcha', request.remote_addr):
+		return api_error('too many captchas, wait a minute', 429)
+	attempt('captcha', request.remote_addr)
 	return jsonify(captcha_create())
 
 
@@ -482,9 +485,14 @@ def auth_login():
 	data = request.get_json(silent=True) or {}
 	if arcade.enabled():
 		return arcade_reply(arcade.login(data.get('username') or '', data.get('password') or '', request.remote_addr))
+	name = (data.get('username') or '').lower()
+	if blocked('account', name) or blocked('ip', request.remote_addr):
+		return api_error('too many failed logins, try again in 15 minutes', 429)
 	with db_connect() as c:
 		row = c.execute('SELECT id, username, password_hash FROM users WHERE username=?', (data.get('username') or '',)).fetchone()
 	if not row or not check_password_hash(row['password_hash'], data.get('password') or ''):
+		attempt('account', name)
+		attempt('ip', request.remote_addr)
 		return api_error('wrong username or password', 401)
 	return jsonify({'token': create_session(row['id']), 'username': row['username'], 'user_id': row['id']})
 

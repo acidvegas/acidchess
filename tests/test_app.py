@@ -332,6 +332,34 @@ class TestApp(unittest.TestCase):
 		self.assertEqual((resp.status_code, resp.get_json()['error']), (503, 'server full, try again later'))
 
 
+	def test_captcha_limits(self):
+		'''The captcha SVG has no text, the store keeps at most CAPTCHA_MAX, and one address gets 30 captchas a minute.'''
+
+		self.assertNotIn('<text', self.call('/auth/captcha')['svg'])
+		with mock.patch.object(auth, 'CAPTCHA_MAX', 3):
+			ids = [auth.captcha_create()['captcha_id'] for _ in range(5)]
+			self.assertLessEqual(len(auth.CAPTCHAS), 3)
+			self.assertNotIn(ids[0], auth.CAPTCHAS)
+			self.assertIn(ids[-1], auth.CAPTCHAS)
+		other = server.app.test_client()
+		other.environ_base['REMOTE_ADDR'] = self.id() + '-other'
+		self.assertTrue(all(other.get('/auth/captcha').status_code == 200 for _ in range(30)))
+		self.assertEqual(other.get('/auth/captcha').status_code, 429)
+		self.assertEqual(self.client.get('/auth/captcha').status_code, 200)
+
+
+	def test_login_limits(self):
+		'''The 11th failed login for one account is refused even with the right password, and other accounts are unaffected.'''
+
+		self.signup('lim_a')
+		self.signup('lim_b')
+		for _ in range(10):
+			self.assertEqual(self.client.post('/auth/login', json={'username': 'lim_a', 'password': 'nope'}).status_code, 401)
+		resp = self.client.post('/auth/login', json={'username': 'LIM_A', 'password': 'hunter22x'})
+		self.assertEqual((resp.status_code, resp.get_json()['error']), (429, 'too many failed logins, try again in 15 minutes'))
+		self.assertIn('token', self.call('/auth/login', {'username': 'lim_b', 'password': 'hunter22x'}))
+
+
 	def test_stream_limit(self):
 		'''One address can hold twenty event streams, and closing one frees its slot.'''
 
