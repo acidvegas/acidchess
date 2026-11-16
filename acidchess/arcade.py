@@ -14,6 +14,7 @@ import urllib.request
 ARCADE_URL    = os.environ.get('ARCADE_URL', '').rstrip('/')        # internal API, e.g. http://acid-arcade-db:20021
 ARCADE_PUBLIC = os.environ.get('ARCADE_PUBLIC_URL', '').rstrip('/') # public site, e.g. https://arcade.{domain} ({domain} becomes the player's parent domain)
 ARCADE_GAME   = os.environ.get('ARCADE_GAME', '')                   # this game's slug in acid-arcade-db's games.json
+ARCADE_KEY    = os.environ.get('ARCADE_KEY', '')                    # this game's key, when acid-arcade-db has ARCADE_GAME_KEYS set
 TIMEOUT       = 5
 COOKIE        = 'arcade_sso' # shared sign-in cookie on the parent domain, e.g. .acid.vegas
 COOKIE_TTL    = 30 * 24 * 60 * 60
@@ -40,7 +41,7 @@ def avatar_url(user_id: int, host: str) -> str:
 def call(path: str, body: dict = None) -> dict:
 	'''GET (no body) or POST JSON to the internal API and return the JSON reply.'''
 
-	req = urllib.request.Request(ARCADE_URL + path, data=None if body is None else json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
+	req = urllib.request.Request(ARCADE_URL + path, data=None if body is None else json.dumps(body).encode(), headers={'Content-Type': 'application/json', 'X-Arcade-Key': ARCADE_KEY})
 	try:
 		with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
 			return json.load(resp)

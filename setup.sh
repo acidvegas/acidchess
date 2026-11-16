@@ -8,7 +8,7 @@ docker rm -f acidchess 2>/dev/null || true
 # With ARCADE_URL set, accounts come from acid-arcade-db on the arcade network
 set --
 if [ -n "$ARCADE_URL" ]; then
-	set -- --network arcade -e ARCADE_URL -e ARCADE_PUBLIC_URL=${ARCADE_PUBLIC_URL:-https://arcade.\{domain\}} -e ARCADE_GAME=chess
+	set -- --network arcade -e ARCADE_URL -e ARCADE_PUBLIC_URL=${ARCADE_PUBLIC_URL:-https://arcade.\{domain\}} -e ARCADE_GAME=chess -e ARCADE_KEY
 fi
 # The one address crawlers and share cards use, when the site answers on several
 if [ -n "$ACIDCHESS_PUBLIC_URL" ]; then
