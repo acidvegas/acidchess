@@ -907,6 +907,15 @@ def resign():
 	return jsonify({'ok': True})
 
 
+@app.route('/healthz')
+def healthz():
+	'''Answer ok when the app and its database respond, for the Docker healthcheck and uptime monitors.'''
+
+	with db_connect() as c:
+		c.execute('SELECT 1')
+	return Response('ok\n', mimetype='text/plain')
+
+
 @app.route('/robots.txt')
 def robots():
 	'''Let crawlers in and point them at the sitemap.'''
