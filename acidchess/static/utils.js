@@ -28,6 +28,8 @@ const REASONS = {
 	'king of the hill': 'by reaching the hill',
 	'three-check': 'by three checks',
 	'explosion': 'by blowing up the king',
+	'opponent left': 'because the opponent left',
+	'left the game': 'because the last opponent left',
 };
 
 let authToken  = localStorage.getItem('acidchess_auth') || '';
