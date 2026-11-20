@@ -1,8 +1,51 @@
-# acidchess
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/logo-dark.png">
+    <img src=".github/logo-light.png" alt="acidchess" width="460">
+  </picture>
+</h1>
 
-## Live demo: [chess.supernets.org](https://chess.supernets.org)
+<p align="center"><b>Online chess in the browser, built with Flask.</b></p>
 
-Online chess in the browser, built with Flask. Standard chess first, then a computer opponent, then new modes, pieces and layouts that bend the rules. See [ROADMAP.md](ROADMAP.md) for what is done and what is next.
+<p align="center">
+  <a href="https://chess.supernets.org"><img src="https://img.shields.io/badge/play-chess.supernets.org-a6ff4d?style=for-the-badge&labelColor=14141f" alt="Play now"></a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.12+-3776ab?logo=python&logoColor=white" alt="Python 3.12+">
+  <img src="https://img.shields.io/badge/flask-3.1-000000?logo=flask&logoColor=white" alt="Flask 3.1">
+  <img src="https://img.shields.io/badge/docker-ready-2496ed?logo=docker&logoColor=white" alt="Docker">
+  <img src="https://img.shields.io/badge/engine-Fairy--Stockfish-b58863" alt="Fairy-Stockfish">
+  <img src="https://img.shields.io/badge/modes-6-a6ff4d?labelColor=14141f" alt="6 modes">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-ISC-8a8aa0" alt="ISC License"></a>
+</p>
+
+<p align="center">
+  <img src=".github/screenshots/classic.png" alt="A classic game in progress" width="860">
+</p>
+
+Standard chess first, then a computer opponent, then new modes, pieces and layouts that bend the rules. See [ROADMAP.md](ROADMAP.md) for what is done and what is next.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src=".github/screenshots/four.png" alt="4-Player game"></td>
+    <td width="50%"><img src=".github/screenshots/big10.png" alt="Big Board 10x10 with holes"></td>
+  </tr>
+  <tr>
+    <td align="center"><i>4-Player</i></td>
+    <td align="center"><i>Big Board 10x10 with the holes twist</i></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src=".github/screenshots/lobby.png" alt="Home screen"></td>
+    <td width="50%" align="center"><img src=".github/screenshots/mobile.png" alt="Playing on a phone" width="240"></td>
+  </tr>
+  <tr>
+    <td align="center"><i>Quick play, computer, create, lobby and leaderboard</i></td>
+    <td align="center"><i>Playing on a phone</i></td>
+  </tr>
+</table>
 
 ## Features
 
